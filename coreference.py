@@ -1,4 +1,4 @@
-import sys, nltk
+import sys, nltk, re
 '''
 Coreference Resolution
 Created on Oct 25, 2012
@@ -23,17 +23,43 @@ def input_listfile(listfile):
         file_list.append(line)
     
     return file_list
-    
-    
-    
-def tagger(chunked):
+
+def get_anaphora(crf_file):
+    return [({"ID":int(m[0]), "anaphor":m[1]}) for m in re.findall(r"<COREF ID=\"(\d+)\">(.*?)</COREF>", crf_file)]
+
+def strip_xml(crf_file):
+    """
+    Strips the XML-style tags from a given .crf input crf_file path.
+    @param crf_file: A valid .crf crf_file path.
+    """
+    rawtext = open(crf_file).read()
+    return re.sub(r"<COREF ID=\"\d+\">|</COREF>|<.*>", '', rawtext)
+
+def tagger(chunked, anaphora):
+    """
+    Comprehensive tagging function. Does all kinds of neat stuff.
+    """
     pass
 
-def np_chunker(raw_inputs):
+def np_chunker(clean_text):
     """
-    Given raw inputs, break up the input into NP chunks
+    Given an XML-free string, break up the input into NP chunks.
+    @param clean_text: 
     """
-    pass
+    sentences = nltk.sent_tokenize(clean_text)
+    sentences = [nltk.word_tokenize(sent) for sent in sentences]
+    sentences = [nltk.pos_tag(sent) for sent in sentences]
+
+    grammar = r"""
+NP: {<DT|PP\$>?<JJ>*<NN|NNS>} # chunk determiner/possessive, adjectives and nouns
+{<NNP>+} # chunk sequences of proper nouns
+"""
+    chunker = nltk.RegexpParser(grammar)
+    return chunker.batch_parse(sentences)
+#    for sent in sentences:
+#        t = chunker.parse(sent)
+#        traverse(t)
+
 
 def hobbs_distance():
     pass
@@ -109,9 +135,34 @@ def log_linear():
     NOTE: Probably shouldn't implement this one.
     """
     pass
-
-def test_nltk():
     
+def traverse(t):
+    """
+    Tree traversal function for extracting NP chunks in a RegexParse'd tree.
+    @param t: POS tagged and parsed chunk.
+    """
+    try:
+        t.node
+    except AttributeError:
+        return
+    else:
+        if t.node == 'NP':  print t  # or do something else
+        else:
+            for child in t:
+                traverse(child)        
+                
+#==============================================================================
+# Test Functions
+#==============================================================================
+def test_xml():
+    res = []
+    rawtext = open("devset/input/1.crf").read() 
+    mat = re.findall(r"<COREF ID=\"(\d+)\">(.*?)</COREF>", rawtext)
+    #for m in mat:
+    res = [({"ID":int(m[0]), "anaphor":m[1]}) for m in re.findall(r"<COREF ID=\"(\d+)\">(.*?)</COREF>", rawtext)]
+    print res
+   
+def test_nltk():
     rawtext = open("devset/raw/1.txt").read()
     sentences = nltk.sent_tokenize(rawtext)
     sentences = [nltk.word_tokenize(sent) for sent in sentences]
@@ -121,30 +172,38 @@ NP: {<DT|PP\$>?<JJ>*<NN|NNS>} # chunk determiner/possessive, adjectives and noun
 {<NNP>+} # chunk sequences of proper nouns
 """
     chunker = nltk.RegexpParser(grammar)
-    
+    print chunker.batch_parse(sentences)
     for sent in sentences:
-        print chunker.parse(sent)
-        print sent
-        
-        
+        t = chunker.parse(sent)
+        traverse(t)
+    
+#===============================================================================
+# Main
+#===============================================================================
 def main():
     list_file = None
     output_dir = None
+    
+    #Rudimentary arg parsing. Since it's defined in the spec I didn't see a need to get fancy.
     if(len(sys.argv) == 3):
         list_file = sys.argv[2]
         output_dir = sys.argv[3]
 #    else:
 #        sys.exit("Incorrect number of input files specified. Aborting")
-    file_list = input_listfile(list_file)
-    for file in file_list:
-        chunked = np_chunker(file)
-        #pass in chunked file to a parser.
-        tagged_ants = tagger(chunked)
+
+    file_list = input_listfile(list_file) # Obtain the list of filenames to coreference-ate 
+
+    for crf_file in file_list:
+        tagged_anaphora = get_anaphora(crf_file) # Get the anaphora and ID's from file.
+        clean_text = strip_xml(crf_file) # Remove XML tagging
+        chunked = np_chunker(clean_text) # Chunk the text into Trees.
+        tagged_antecedents = tagger(chunked) # Start the tagger. 
         
-    # Call chunker for each story within file_list
+    
 
 if __name__ == '__main__':
 #    main()
     test_nltk()
+#    test_xml()
 
 
