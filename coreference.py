@@ -3,23 +3,32 @@ import sys, nltk
 Coreference Resolution
 Created on Oct 25, 2012
 
+# REQUIRED NLTK PACKAGES:
+# punkt
+# maxent_treebank_pos_tagger
+
 @author: John Wells
 @author: Joel Hough
 
 '''
 def input_listfile(listfile):
-    raw_inputs = []
+    
+    file_list = []
     
     if(listfile is None):
         sys.exit("No listfile detected. Exiting.")
     else:
         fin = open(listfile)
     for line in fin.readlines():
-        # Throw all text into key/value pairs? Key being the filename, since it's used later.
-        pass
+        file_list.append(line)
     
-    return raw_inputs
+    return file_list
     
+    
+    
+def tagger(chunked):
+    pass
+
 def np_chunker(raw_inputs):
     """
     Given raw inputs, break up the input into NP chunks
@@ -101,7 +110,23 @@ def log_linear():
     """
     pass
 
-
+def test_nltk():
+    
+    rawtext = open("devset/raw/1.txt").read()
+    sentences = nltk.sent_tokenize(rawtext)
+    sentences = [nltk.word_tokenize(sent) for sent in sentences]
+    sentences = [nltk.pos_tag(sent) for sent in sentences]
+    grammar = r"""
+NP: {<DT|PP\$>?<JJ>*<NN|NNS>} # chunk determiner/possessive, adjectives and nouns
+{<NNP>+} # chunk sequences of proper nouns
+"""
+    chunker = nltk.RegexpParser(grammar)
+    
+    for sent in sentences:
+        print chunker.parse(sent)
+        print sent
+        
+        
 def main():
     list_file = None
     output_dir = None
@@ -110,7 +135,16 @@ def main():
         output_dir = sys.argv[3]
 #    else:
 #        sys.exit("Incorrect number of input files specified. Aborting")
-    tagged_stories = input_listfile(list_file)
+    file_list = input_listfile(list_file)
+    for file in file_list:
+        chunked = np_chunker(file)
+        #pass in chunked file to a parser.
+        tagged_ants = tagger(chunked)
+        
+    # Call chunker for each story within file_list
 
 if __name__ == '__main__':
-    main()
+#    main()
+    test_nltk()
+
+
