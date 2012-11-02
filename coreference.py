@@ -25,6 +25,10 @@ def input_listfile(listfile):
     return file_list
 
 def get_anaphora(crf_file):
+    """
+    Obtains all valid XML-tagged anaphora from a given input file.
+    @param crf_file: Valid XML-tagged (<COREF ID=\d> </COREF>) file.
+    """
     return [({"ID":int(m[0]), "anaphor":m[1]}) for m in re.findall(r"<COREF ID=\"(\d+)\">(.*?)</COREF>", crf_file)]
 
 def strip_xml(crf_file):
@@ -38,6 +42,8 @@ def strip_xml(crf_file):
 def tagger(chunked, anaphora):
     """
     Comprehensive tagging function. Does all kinds of neat stuff.
+    Tagged antecedents should be mapped with respect to their coreferent anaphora ID (number), a unique alpha character, and the word.
+    {'id' = <anaphor_id>, 'uid' = [A-Z], 'antecedent' = <word>}
     """
     pass
 
@@ -46,6 +52,7 @@ def np_chunker(clean_text):
     Given an XML-free string, break up the input into NP chunks.
     @param clean_text: 
     """
+    
     sentences = nltk.sent_tokenize(clean_text)
     sentences = [nltk.word_tokenize(sent) for sent in sentences]
     sentences = [nltk.pos_tag(sent) for sent in sentences]
@@ -60,20 +67,71 @@ NP: {<DT|PP\$>?<JJ>*<NN|NNS>} # chunk determiner/possessive, adjectives and noun
 #        t = chunker.parse(sent)
 #        traverse(t)
 
+def pronoun_matcher():
+    """
+    Relevant factors for pronoun resolution:
+        Recency: (Anaphor should always point to the most recent applicable antecedant.)
+        Grammatical Role: Entities introduced in the subject are more salient than those in the object, and so forth.
+            (This could be applied to pronouns over multiple sentences.)
+            (Bill went to the bar with Jim. He called for a glass of rum.) <- He refers to Bill.
+        Repeated mention: Ideas focused on previously are more likely to be focused on again.
+            (Bill had done some stuff earlier. He walked over to the bar. Jim went with him. He ordered a glass of rum.)
+            While either is valid, it's more likely that He referes to Bill.
+        Parallelism: A little too complex.
+        Verb Semantics: Certain verbs place a semantically oriented emphasis on one of their argument positions. This can have the
+            effect of biasing the manner in which the subsequent pronouns are interpreted.
+            (John telephoned Bill. He lost the laptop) (John criticized Bill. He lost the laptop)
+            This is defined as "implicit causality"
+    """
+    pass
+
+def string_matcher(chunked_text, anaphora):
+    """
+    Possible uses for string matching:
+    Exact matches of Proper Names
+    Common NPs can be matched, but can be risky.
+    Partial String matching is more risky.
+    Titles, abbreviations, and acronym recognition.
+    """
+    
+    #Proper names:
+    
+    #Common NPs
+    
+    #Partial Matches
+    
+    #Advanced:
+    pass
 
 def hobbs_distance():
     pass
 
 def sentence_distance():
+    """
+    """
     pass
 
 def gender_agreement():
+    """
+    Referents must agree with the gender specified by the referring expression. 
+    Animate entities are always related to male and female pronouns.
+    Inanimate entities are nonpersonal.
+    """
     pass
 
 def number_agreement():
+    """
+    Generally, the number of items in the referent must agree with the referring expression.
+    John has a thing. They are red. # Does not agree.
+    John has a thing. It is red. # Does agree.
+    Plural = Plural, Singular = Singular.
+    """
     pass
 
-def output_response():
+def output_response(input_file, tagged_antecedents):
+    """
+    Given a list of Tagged Anaphora and antecedents, and an original input file, create a tagged output file.
+    """
     pass
 
 def edit_distance(anaphor, antecedent):
@@ -136,7 +194,7 @@ def log_linear():
     """
     pass
     
-def traverse(t):
+def traverse(t, anaphora):
     """
     Tree traversal function for extracting NP chunks in a RegexParse'd tree.
     @param t: POS tagged and parsed chunk.
@@ -147,9 +205,10 @@ def traverse(t):
         return
     else:
         if t.node == 'NP':  print t  # or do something else
+               
         else:
             for child in t:
-                traverse(child)        
+                traverse(child, anaphora)        
                 
 #==============================================================================
 # Test Functions
@@ -160,9 +219,13 @@ def test_xml():
     mat = re.findall(r"<COREF ID=\"(\d+)\">(.*?)</COREF>", rawtext)
     #for m in mat:
     res = [({"ID":int(m[0]), "anaphor":m[1]}) for m in re.findall(r"<COREF ID=\"(\d+)\">(.*?)</COREF>", rawtext)]
-    print res
-   
+    return res
+
+
 def test_nltk():
+    t = nltk.Tree
+    anaphora = test_xml()
+    print anaphora
     rawtext = open("devset/raw/1.txt").read()
     sentences = nltk.sent_tokenize(rawtext)
     sentences = [nltk.word_tokenize(sent) for sent in sentences]
@@ -172,10 +235,10 @@ NP: {<DT|PP\$>?<JJ>*<NN|NNS>} # chunk determiner/possessive, adjectives and noun
 {<NNP>+} # chunk sequences of proper nouns
 """
     chunker = nltk.RegexpParser(grammar)
-    print chunker.batch_parse(sentences)
-    for sent in sentences:
+    for sent in chunker.batch_parse(sentences):
+        
         t = chunker.parse(sent)
-        traverse(t)
+        traverse(t, anaphora)
     
 #===============================================================================
 # Main
