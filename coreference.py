@@ -29,15 +29,15 @@ def get_anaphora(crf_file):
     Obtains all valid XML-tagged anaphora from a given input file.
     @param crf_file: Valid XML-tagged (<COREF ID=\d> </COREF>) file.
     """
-    return [({"ID":int(m[0]), "anaphor":m[1]}) for m in re.findall(r"<COREF ID=\"(\d+)\">(.*?)</COREF>", crf_file)]
+    return [({"ID":int(m[0]), "ana":m[1]}) for m in re.findall(r"<COREF ID=\"(\d+)\">(.*?)</COREF>", crf_file)]
 
 def strip_xml(crf_file):
     """
     Strips the XML-style tags from a given .crf input crf_file path.
     @param crf_file: A valid .crf crf_file path.
     """
-    rawtext = open(crf_file).read()
-    return re.sub(r"<COREF ID=\"\d+\">|</COREF>|<.*>", '', rawtext)
+    #rawtext = open(crf_file).read()
+    return re.sub(r"<COREF ID=\"\d+\">|</COREF>|<.*>", '', open(crf_file).read()) # Let's be concise, shall we?
 
 def tagger(chunked, anaphora):
     """
@@ -128,10 +128,16 @@ def number_agreement():
     """
     pass
 
-def output_response(input_file, tagged_antecedents):
+def output_response(anaphora, tagged_antecedents, output_filename):
     """
     Given a list of Tagged Anaphora and antecedents, and an original input file, create a tagged output file.
+    Note: The references do not need to be placed back into the original story. They can be placed side-by-side.
+    The grading program only looks at XML tags. It doesn't care about the background story.
     """
+    # Example output: <COREF ID="A">antecedent</COREF> <COREF ID="1" REF="A">anaphora</COREF>
+    fout = open(output_filename, "rw+")
+    # Do something else.
+    
     pass
 
 def edit_distance(anaphor, antecedent):
@@ -196,6 +202,7 @@ def log_linear():
     
 def traverse(t, anaphora):
     """
+    11/2: This concatenates each NP in the tree, and attempts to find a match in the given anaphora hash.
     Tree traversal function for extracting NP chunks in a RegexParse'd tree.
     @param t: POS tagged and parsed chunk.
     """
@@ -204,11 +211,21 @@ def traverse(t, anaphora):
     except AttributeError:
         return
     else:
-        if t.node == 'NP':  print t  # or do something else
+        if t.node == 'NP': 
+#            print ' '.join([(leaf[0]) for leaf in t.leaves()])
+            l = t.leaves()  # or do something else
+            leaf = [(x[0]) for x in l]
+            __list = ' '.join(leaf)
+            anas = [(anaphor) for anaphor in anaphora if anaphor['ana'] in leaf]
+            if anas:
+                print anas, __list
+            
+                
                
         else:
             for child in t:
-                traverse(child, anaphora)        
+                traverse(child, anaphora)
+        
                 
 #==============================================================================
 # Test Functions
@@ -218,27 +235,39 @@ def test_xml():
     rawtext = open("devset/input/1.crf").read() 
     mat = re.findall(r"<COREF ID=\"(\d+)\">(.*?)</COREF>", rawtext)
     #for m in mat:
-    res = [({"ID":int(m[0]), "anaphor":m[1]}) for m in re.findall(r"<COREF ID=\"(\d+)\">(.*?)</COREF>", rawtext)]
+    res = [({"ID":int(m[0]), "ana":m[1]}) for m in re.findall(r"<COREF ID=\"(\d+)\">(.*?)</COREF>", rawtext)]
     return res
 
 
 def test_nltk():
     t = nltk.Tree
     anaphora = test_xml()
-    print anaphora
-    rawtext = open("devset/raw/1.txt").read()
+#    print anaphora
+    rawtext = open("devset/input/1.crf").read()
     sentences = nltk.sent_tokenize(rawtext)
     sentences = [nltk.word_tokenize(sent) for sent in sentences]
     sentences = [nltk.pos_tag(sent) for sent in sentences]
+    for s in sentences:
+        for a in anaphora:
+            if a['ana'] in s[0]:
+                print a['ana'], ":\t", s
     grammar = r"""
 NP: {<DT|PP\$>?<JJ>*<NN|NNS>} # chunk determiner/possessive, adjectives and nouns
 {<NNP>+} # chunk sequences of proper nouns
+
 """
+    np_list = []
     chunker = nltk.RegexpParser(grammar)
-    for sent in chunker.batch_parse(sentences):
+    parsed = chunker.batch_parse(sentences)
+    print parsed
+
+    
+    for sent in parsed:
+        traverse(sent, anaphora)
+
+
+
         
-        t = chunker.parse(sent)
-        traverse(t, anaphora)
     
 #===============================================================================
 # Main
