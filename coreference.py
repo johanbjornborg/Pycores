@@ -1,3 +1,5 @@
+import os
+from pprint import pprint as pp
 import sys, nltk, re
 '''
 Coreference Resolution
@@ -29,7 +31,7 @@ def get_anaphora(crf_file):
     Obtains all valid XML-tagged anaphora from a given input file.
     @param crf_file: Valid XML-tagged (<COREF ID=\d> </COREF>) file.
     """
-    return [({"ID":int(m[0]), "ana":m[1]}) for m in re.findall(r"<COREF ID=\"(\d+)\">(.*?)</COREF>", crf_file)]
+    return [({"ID":int(m[0]), 'value':m[1]}) for m in re.findall(r"<COREF ID=\"(\d+)\">(.*?)</COREF>", crf_file)]
 
 def strip_xml(crf_file):
     """
@@ -216,7 +218,7 @@ def traverse(t, anaphora):
             l = t.leaves()  # or do something else
             leaf = [(x[0]) for x in l]
             __list = ' '.join(leaf)
-            anas = [(anaphor) for anaphor in anaphora if anaphor['ana'] in leaf]
+            anas = [(anaphor) for anaphor in anaphora if anaphor['value'] in leaf]
             if anas:
                 print anas, __list
             
@@ -235,7 +237,7 @@ def test_xml():
     rawtext = open("devset/input/1.crf").read() 
     mat = re.findall(r"<COREF ID=\"(\d+)\">(.*?)</COREF>", rawtext)
     #for m in mat:
-    res = [({"ID":int(m[0]), "ana":m[1]}) for m in re.findall(r"<COREF ID=\"(\d+)\">(.*?)</COREF>", rawtext)]
+    res = [({"ID":int(m[0]), 'value':m[1]}) for m in re.findall(r"<COREF ID=\"(\d+)\">(.*?)</COREF>", rawtext)]
     return res
 
 
@@ -249,8 +251,8 @@ def test_nltk():
     sentences = [nltk.pos_tag(sent) for sent in sentences]
     for s in sentences:
         for a in anaphora:
-            if a['ana'] in s[0]:
-                print a['ana'], ":\t", s
+            if a['value'] in s[0]:
+                print a['value'], ":\t", s
     grammar = r"""
 NP: {<DT|PP\$>?<JJ>*<NN|NNS>} # chunk determiner/possessive, adjectives and nouns
 {<NNP>+} # chunk sequences of proper nouns
@@ -263,39 +265,71 @@ NP: {<DT|PP\$>?<JJ>*<NN|NNS>} # chunk determiner/possessive, adjectives and noun
 
     
     for sent in parsed:
+        t = chunker.parse(sent)
+        pp(t)
         traverse(sent, anaphora)
 
+def each_with_tail(seq):
+    i = 0
+    l = list(seq)
+    while (l[i:]):
+        i += 1
+        yield (l[i-1], l[i:])
 
+def word_match_resolver(anaphora):
+    for anaphor, potential_antecedents in each_with_tail(reversed(anaphora)):
+        for potential_antecedent in potential_antecedents:
+            if any(word for word in anaphor['value'].split() if word in  potential_antecedent['value'].split()):
+                yield {'ID': anaphor['ID'], 'REF': potential_antecedent['ID']}
+                break
 
-        
+def update_refs(text, refs):
+    new_text = text
+    for ref in refs:
+        new_text = new_text.replace('<COREF ID="{0[ID]}">'.format(ref), '<COREF ID="{0[ID]}" REF="{0[REF]}">'.format(ref))
+    return new_text
+
+def resolve_file(input_path, response_dir_path):
+    name = os.path.splitext(os.path.basename(input_path))[0]
+    output_path = os.path.join(response_dir_path, name + '.response')
+
+    text = open(input_path, 'r').read()
+
+    anaphora = get_anaphora(text)
+
+    refs = word_match_resolver(anaphora)
     
+    resolved_text = update_refs(text, refs)
+
+    open(output_path, 'w').write(resolved_text)
+
+def resolve_files(files, response_dir_path):
+    for file in files:
+        resolve_file(file, response_dir_path)
+        
 #===============================================================================
 # Main
 #===============================================================================
 def main():
-    list_file = None
-    output_dir = None
-    
-    #Rudimentary arg parsing. Since it's defined in the spec I didn't see a need to get fancy.
-    if(len(sys.argv) == 3):
-        list_file = sys.argv[2]
-        output_dir = sys.argv[3]
-#    else:
-#        sys.exit("Incorrect number of input files specified. Aborting")
+    listfile_path = sys.argv[1]
+    response_dir_path = sys.argv[2]
 
-    file_list = input_listfile(list_file) # Obtain the list of filenames to coreference-ate 
+    files = [l.strip() for l in open(listfile_path, 'r').readlines()]
 
-    for crf_file in file_list:
-        tagged_anaphora = get_anaphora(crf_file) # Get the anaphora and ID's from file.
-        clean_text = strip_xml(crf_file) # Remove XML tagging
-        chunked = np_chunker(clean_text) # Chunk the text into Trees.
-        tagged_antecedents = tagger(chunked) # Start the tagger. 
+    resolve_files(files, response_dir_path)
+    # file_list = input_listfile(list_file) # Obtain the list of filenames to coreference-ate 
+
+    # for crf_file in file_list:
+    #     tagged_anaphora = get_anaphora(crf_file) # Get the anaphora and ID's from file.
+    #     clean_text = strip_xml(crf_file) # Remove XML tagging
+    #     chunked = np_chunker(clean_text) # Chunk the text into Trees.
+    #     tagged_antecedents = tagger(chunked) # Start the tagger. 
         
     
 
 if __name__ == '__main__':
-#    main()
-    test_nltk()
+    main()
+#    test_nltk()
 #    test_xml()
 
 
