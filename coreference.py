@@ -13,6 +13,8 @@ Created on Oct 25, 2012
 @author: Joel Hough
 
 '''
+tokenizer = nltk.data.load('tokenizers/punkt/english.pickle')
+
 def input_listfile(listfile):
     
     file_list = []
@@ -26,12 +28,26 @@ def input_listfile(listfile):
     
     return file_list
 
-def get_anaphora(crf_file):
+def count_sentences(text):
+    """
+    An _approximate_ count of sentences in the text.
+    """
+    global tokenizer
+    return len(tokenizer.tokenize(text.strip()))
+
+def get_anaphora(text):
     """
     Obtains all valid XML-tagged anaphora from a given input file.
-    @param crf_file: Valid XML-tagged (<COREF ID=\d> </COREF>) file.
+    @param text: Valid XML-tagged (<COREF ID=\d> </COREF>) file.
     """
-    return [({"ID":int(m[0]), 'value':m[1]}) for m in re.findall(r"<COREF ID=\"(\d+)\">(.*?)</COREF>", crf_file)]
+    global tokenizer
+    # I don't know that I trust the tokenizer to not split between tags, so I don't depend on it not doing it
+    corefs = dict((m.groups()[0], {'ID':m.groups()[0], 'value':m.groups()[1], 'position':m.start()}) for m in re.finditer(r'<COREF ID="(\w+)">(.*?)</COREF>', text))
+    i = 0
+    for sentence in tokenizer.tokenize(text.strip()):
+        for id in re.findall(r'<COREF ID="(\w+)">', sentence):
+            corefs[id].update({'sentence_position': i, 'sentence': sentence})
+    return corefs.values()
 
 def strip_xml(crf_file):
     """
@@ -276,12 +292,34 @@ def each_with_tail(seq):
         i += 1
         yield (l[i-1], l[i:])
 
-def word_match_resolver(anaphora):
-    for anaphor, potential_antecedents in each_with_tail(reversed(anaphora)):
-        for potential_antecedent in potential_antecedents:
-            if any(word for word in anaphor['value'].split() if word in  potential_antecedent['value'].split()):
-                yield {'ID': anaphor['ID'], 'REF': potential_antecedent['ID']}
-                break
+def any_word_matches_p(anaphor, potential_antecedent):
+    return any(word for word in anaphor['value'].split() if word in  potential_antecedent['value'].split())
+
+def sentence_distance(anaphor, potential_antecedent):
+    return anaphor['sentence_position'] - potential_antecedent['sentence_position']
+
+def distance(anaphor, potential_antecedent):
+    return anaphor['position'] - potential_antecedent['position']
+
+def features(anaphor, potential_antecedent):
+    return {
+        'REF': potential_antecedent['ID'],
+        'word_match': any_word_matches_p(anaphor, potential_antecedent), 
+        'sentence_distance': sentence_distance(anaphor, potential_antecedent),
+        'distance': distance(anaphor, potential_antecedent)}
+
+def coreferent_pairs_features(anaphora):
+    refs = dict()
+    for anaphor, potential_antecedents in each_with_tail(sorted(anaphora, key=lambda a:a['position'], reverse=True)):
+        refs[anaphor['ID']] = [features(anaphor, potential_antecedent) for potential_antecedent in potential_antecedents]
+    return refs
+
+def feature_resolver(anaphora):
+    features = coreferent_pairs_features(anaphora)
+    for id in features:
+        matches = filter(lambda f: f['word_match'], features[id])
+        if matches:
+            yield {'ID': id, 'REF': min(matches, key=lambda f: f['distance'])['REF']}
 
 def update_refs(text, refs):
     new_text = text
@@ -297,7 +335,7 @@ def resolve_file(input_path, response_dir_path):
 
     anaphora = get_anaphora(text)
 
-    refs = word_match_resolver(anaphora)
+    refs = feature_resolver(anaphora)
     
     resolved_text = update_refs(text, refs)
 
