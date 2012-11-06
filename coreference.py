@@ -125,10 +125,10 @@ def string_matcher(chunked_text, anaphora):
 def hobbs_distance():
     pass
 
-def sentence_distance():
-    """
-    """
-    pass
+#def sentence_distance():
+#    """
+#    """
+#    pass
 
 def gender_agreement():
     """
@@ -328,7 +328,8 @@ def feature_resolver(anaphora):
 def update_refs(text, refs):
     new_text = text
     for ref in refs:
-        new_text = new_text.replace('<COREF ID="{0[ID]}">'.format(ref), '<COREF ID="{0[ID]}" REF="{0[REF]}">'.format(ref))
+        new_text = new_text.replace('<COREF ID="{0[ID]}">'.format(ref),'<COREF ID="{0[ID]}" REF="{0[REF]}">'.format(ref))
+
     return new_text
 
 def resolve_file(input_path, response_dir_path):
