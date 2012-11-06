@@ -14,6 +14,7 @@ Created on Oct 25, 2012
 
 '''
 tokenizer = nltk.data.load('tokenizers/punkt/english.pickle')
+lemmatizer = nltk.WordNetLemmatizer()
 
 def input_listfile(listfile):
     
@@ -292,8 +293,11 @@ def each_with_tail(seq):
         i += 1
         yield (l[i-1], l[i:])
 
+def lemmatize(word):
+    return lemmatizer.lemmatize(word)
+    
 def any_word_matches_p(anaphor, potential_antecedent):
-    return any(word for word in anaphor['value'].split() if word in  potential_antecedent['value'].split())
+    return any(word for word in anaphor['value'].split() if lemmatize(word.lower()) in map(lambda w: lemmatize(w.lower()), potential_antecedent['value'].split()))
 
 def sentence_distance(anaphor, potential_antecedent):
     return anaphor['sentence_position'] - potential_antecedent['sentence_position']
