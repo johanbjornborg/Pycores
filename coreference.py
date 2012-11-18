@@ -86,7 +86,7 @@ NP: {<DT|PP\$>?<JJ>*<NN|NNS>} # chunk determiner/possessive, adjectives and noun
 #        t = chunker.parse(sent)
 #        traverse(t)
 
-def pronoun_matcher():
+def pronoun_matcher(text, anaphora):
     """
     Relevant factors for pronoun resolution:
         Recency: (Anaphor should always point to the most recent applicable antecedant.)
@@ -101,8 +101,33 @@ def pronoun_matcher():
             effect of biasing the manner in which the subsequent pronouns are interpreted.
             (John telephoned Bill. He lost the laptop) (John criticized Bill. He lost the laptop)
             This is defined as "implicit causality"
+            
+    11/18/2012: 
+        Needs: list of anaphora, some kind of text (raw, or XML-tagged). If XML-tagged, remove them prior to chunking.
+        It still needs to be chunked and tokenized, which can be local to this function if need be.
     """
-    pass
+    sentences = nltk.sent_tokenize(text)
+    sentences = [nltk.word_tokenize(sent) for sent in sentences]
+    sentences = [nltk.pos_tag(sent) for sent in sentences]
+    grammar = r"""
+NP: {<DT|PP\$>?<JJ>*<NN|NNS>} # chunk determiner/possessive, adjectives and nouns
+{<NNP>+} # chunk sequences of proper nouns
+
+"""
+    chunker = nltk.RegexpParser(grammar)
+    parsed = chunker.batch_parse(sentences)
+
+    for sent in parsed:
+        t = chunker.parse(sent)
+        t = t.flatten()
+        u = [(i, val) for i, val in enumerate(t) if "PRP" in val]
+        for i,_u in u:
+            for nn in t[:i]:
+                if "NN" in nn or "NNS" in nn or "NNP" in nn or "NNPS" in nn:
+                    for a in anaphora:
+                        if a['value'] in _u[0]: # Check for gender/number agreement here.
+                            a['pro_ants'] = nn[0]
+    return anaphora
 
 def string_matcher(chunked_text, anaphora):
     """
@@ -124,11 +149,6 @@ def string_matcher(chunked_text, anaphora):
 
 def hobbs_distance():
     pass
-
-#def sentence_distance():
-#    """
-#    """
-#    pass
 
 def gender_agreement():
     """
@@ -275,12 +295,11 @@ NP: {<DT|PP\$>?<JJ>*<NN|NNS>} # chunk determiner/possessive, adjectives and noun
 {<NNP>+} # chunk sequences of proper nouns
 
 """
+
     np_list = []
     chunker = nltk.RegexpParser(grammar)
     parsed = chunker.batch_parse(sentences)
-    print parsed
-
-    
+    print parsed    
     for sent in parsed:
         t = chunker.parse(sent)
         pp(t)
@@ -291,7 +310,7 @@ def each_with_tail(seq):
     l = list(seq)
     while (l[i:]):
         i += 1
-        yield (l[i-1], l[i:])
+        yield (l[i - 1], l[i:])
 
 def lemmatize(word):
     return lemmatizer.lemmatize(word)
@@ -308,7 +327,7 @@ def distance(anaphor, potential_antecedent):
 def features(anaphor, potential_antecedent):
     return {
         'REF': potential_antecedent['ID'],
-        'word_match': any_word_matches_p(anaphor, potential_antecedent), 
+        'word_match': any_word_matches_p(anaphor, potential_antecedent),
         'sentence_distance': sentence_distance(anaphor, potential_antecedent),
         'distance': distance(anaphor, potential_antecedent)}
 
@@ -326,9 +345,12 @@ def feature_resolver(anaphora):
             yield {'ID': id, 'REF': min(matches, key=lambda f: f['distance'])['REF']}
 
 def update_refs(text, refs):
+    """
+    Given a list of Tagged Anaphora and antecedents, and an original input file, create a tagged output file.
+    """
     new_text = text
     for ref in refs:
-        new_text = new_text.replace('<COREF ID="{0[ID]}">'.format(ref),'<COREF ID="{0[ID]}" REF="{0[REF]}">'.format(ref))
+        new_text = new_text.replace('<COREF ID="{0[ID]}">'.format(ref), '<COREF ID="{0[ID]}" REF="{0[REF]}">'.format(ref))
 
     return new_text
 
