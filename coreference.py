@@ -43,7 +43,7 @@ def get_anaphora(text):
     """
     global tokenizer
     # I don't know that I trust the tokenizer to not split between tags, so I don't depend on it not doing it
-    corefs = dict((m.groups()[0], {'ID':m.groups()[0], 'value':m.groups()[1], 'position':m.start()}) for m in re.finditer(r'<COREF ID="(\w+)">(.*?)</COREF>', text))
+    corefs = dict((m.groups()[0], {'ID':m.groups()[0], 'value':m.groups()[1], 'position':m.start()}) for m in re.finditer(r'<COREF ID="(\w+)">(.*?)</COREF>', text, re.DOTALL | re.MULTILINE))
     i = 0
     for sentence in tokenizer.tokenize(text.strip()):
         for id in re.findall(r'<COREF ID="(\w+)">', sentence):
@@ -358,8 +358,8 @@ def resolve_file(input_path, response_dir_path):
     name = os.path.splitext(os.path.basename(input_path))[0]
     output_path = os.path.join(response_dir_path, name + '.response')
 
-    text = open(input_path, 'r').read()
-
+    text = re.sub(r'\s+', ' ', open(input_path, 'r').read(), re.DOTALL | re.MULTILINE)
+    
     anaphora = get_anaphora(text)
 
     refs = feature_resolver(anaphora)
