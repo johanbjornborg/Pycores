@@ -86,48 +86,15 @@ NP: {<DT|PP\$>?<JJ>*<NN|NNS>} # chunk determiner/possessive, adjectives and noun
 #        t = chunker.parse(sent)
 #        traverse(t)
 
-def pronoun_matcher(text, anaphora):
-    """
-    Relevant factors for pronoun resolution:
-        Recency: (Anaphor should always point to the most recent applicable antecedant.)
-        Grammatical Role: Entities introduced in the subject are more salient than those in the object, and so forth.
-            (This could be applied to pronouns over multiple sentences.)
-            (Bill went to the bar with Jim. He called for a glass of rum.) <- He refers to Bill.
-        Repeated mention: Ideas focused on previously are more likely to be focused on again.
-            (Bill had done some stuff earlier. He walked over to the bar. Jim went with him. He ordered a glass of rum.)
-            While either is valid, it's more likely that He referes to Bill.
-        Parallelism: A little too complex.
-        Verb Semantics: Certain verbs place a semantically oriented emphasis on one of their argument positions. This can have the
-            effect of biasing the manner in which the subsequent pronouns are interpreted.
-            (John telephoned Bill. He lost the laptop) (John criticized Bill. He lost the laptop)
-            This is defined as "implicit causality"
-            
-    11/18/2012: 
-        Needs: list of anaphora, some kind of text (raw, or XML-tagged). If XML-tagged, remove them prior to chunking.
-        It still needs to be chunked and tokenized, which can be local to this function if need be.
-    """
-    sentences = nltk.sent_tokenize(text)
-    sentences = [nltk.word_tokenize(sent) for sent in sentences]
-    sentences = [nltk.pos_tag(sent) for sent in sentences]
-    grammar = r"""
-NP: {<DT|PP\$>?<JJ>*<NN|NNS>} # chunk determiner/possessive, adjectives and nouns
-{<NNP>+} # chunk sequences of proper nouns
+def pronoun_matcher(anaphor, antecedent):
 
-"""
-    chunker = nltk.RegexpParser(grammar)
-    parsed = chunker.batch_parse(sentences)
-
-    for sent in parsed:
-        t = chunker.parse(sent)
-        t = t.flatten()
-        u = [(i, val) for i, val in enumerate(t) if "PRP" in val]
-        for i,_u in u:
-            for nn in t[:i]:
-                if "NN" in nn or "NNS" in nn or "NNP" in nn or "NNPS" in nn:
-                    for a in anaphora:
-                        if a['value'] in _u[0]: # Check for gender/number agreement here.
-                            a['pro_ants'] = nn[0]
-    return anaphora
+    if 'PRP' in anaphor: 
+        if "NN" in antecedent or "NNP" in antecedent: # Singular
+            return True
+        elif "NNS" in antecedent or "NNPS" in antecedent: # Plural
+            return True
+    else:
+        return False
 
 def string_matcher(chunked_text, anaphora):
     """
