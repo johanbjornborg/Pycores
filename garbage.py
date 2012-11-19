@@ -75,6 +75,17 @@ NP: {<DT|PP\$>?<JJ>*<NN|NNS>} # chunk determiner/possessive, adjectives and noun
     pp(anaphora)
     return anaphora
 
+def dummy():
+    rawtext = open("devset/input/1.crf").read() 
+    res = [({"ID":int(m[0]), 'value':m[1]}) for m in re.findall(r"<COREF ID=\"(\d+)\">(.*?)</COREF>", rawtext)]
+    return res
+
+def findtags(tag_prefix, tagged_text):
+    cfd = nltk.ConditionalFreqDist((tag, word) for (word, tag) in tagged_text
+                                  if tag == tag_prefix)
+    
+    return dict((tag, cfd[tag].keys()[:]) for tag in cfd.conditions())
+
 if __name__ == '__main__':
     anaphora = test_xml()
     test_nltk(anaphora)
