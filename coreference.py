@@ -49,7 +49,11 @@ def get_anaphora(text):
     for sentence in tokenizer.tokenize(text.strip()):
         for id in re.findall(r'<COREF ID="(\w+)">', sentence):
             corefs[id].update({'sentence_position': i, 'sentence': sentence})
+            i += 1
     return corefs.values()
+
+def get_anaphora_with_periods(anaphora):
+    return [(a['value']) for a in anaphora if '.' in a['value']]    
 
 def strip_xml(crf_file):
     """
@@ -77,11 +81,12 @@ NP: {<DT|PP\$>?<JJ>*<NN|NNS>} # chunk determiner/possessive, adjectives and noun
     chunker = nltk.RegexpParser(grammar)
     return chunker.batch_parse(sentences)
 
-def pronoun_matcher(sentence, anaphor):
-    
+def pronoun_matcher(potential_antecedent, anaphor):
+    sentence = anaphor['sentence']
+#    print potential_antecedent['value'], sentence
     global names
 #    t = chunker.parse(sentences)
-    a = [(a[0]) for a in anaphor if 'PRP' in a[1]]
+    a = [(a[0]) for a in anaphor['value'] if 'PRP' in a[1]]
     if a: # If there exists a pronoun.
         for u in reversed(sentence):
             try:
@@ -103,9 +108,12 @@ def pronoun_matcher(sentence, anaphor):
             except AttributeError:
                 continue
 
-def is_appositive(sentence, anaphor):
+def is_appositive(potential_antecedent, anaphor):
+    
     try:
+        sentence = anaphor['sentence']
         #If the chunk prior to the anaphor location is a NP, verify that it also contains a comma.
+        print anaphor
         if sentence[-1].node == 'NP': # Probably should check the anaphor to ensure that is in fact a NP as well.
             appos = [ap for ap in sentence[-1].leaves() if ',' in ap[0]]
             if appos:

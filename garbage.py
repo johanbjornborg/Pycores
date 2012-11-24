@@ -71,21 +71,46 @@ def appositive(sentences, anaphor):
             except AttributeError:
                 continue
 
-        
+def get_anaphora_with_periods(anaphora):
+    return [(a['value']) for a in anaphora if '.' in a['value']]        
     
-           
+def fix_span_breaks(str_idx, pairs):
+    span = []
+    i = 0
+    j = 0
+    low = 0
+    hi = str_idx[-1][1]
+    p = pairs[j]
+    s = str_idx[i]
+    low,hi = set(s)
+    for p in pairs:
+        while max(s) < max(p):
+            i += 1
+            s = str_idx[i]
+            hi = s[1]
+        inter = list(set(range(low,hi)) & set(p))
+        print inter
+        if len(inter) == 2: 
+            span.append((low,hi))
+    print span
+    
 if __name__ == '__main__':
+    idx = [(0,26),(27,92),(93,111),(112,148),(149,188)]
+    pairs = [(23,34),(45,60),(97,105),(110,126),(144,155)]
+    #OUTPUT: 0-92, 93-188
+    fix_span_breaks(idx, pairs)
 #    anaphora = test_xml()
+#    get_anaphora_with_periods(anaphora)
 #    test_nltk(anaphora)
-    names = nltk.corpus.names
-    grammar = r"""
-NP: {<DT|PP\$>?<JJ>*<NN|NNS>} # chunk determiner/possessive, adjectives and nouns
-{<NNP>+} # chunk sequences of proper nouns
-
-"""
-    chunker = nltk.RegexpParser(grammar)
-    sentence = "As senior director of UAL, and a member of the executive committee of its board, I am appalled at the inaccuracies and anti-management bias in the Journal's April 17 article about Richard Ferris, "
-    ana = "he"
-    sentences = nltk.pos_tag(sentence.split())
-    anaphor = nltk.pos_tag(ana.split())
-    print appositive(sentences, anaphor)
+#    names = nltk.corpus.names
+#    grammar = r"""
+#NP: {<DT|PP\$>?<JJ>*<NN|NNS>} # chunk determiner/possessive, adjectives and nouns
+#{<NNP>+} # chunk sequences of proper nouns
+#
+#"""
+#    chunker = nltk.RegexpParser(grammar)
+#    sentence = "As senior director of UAL, and a member of the executive committee of its board, I am appalled at the inaccuracies and anti-management bias in the Journal's April 17 article about Richard Ferris, "
+#    ana = "he"
+#    sentences = nltk.pos_tag(sentence.split())
+#    anaphor = nltk.pos_tag(ana.split())
+#    print appositive(sentences, anaphor)
