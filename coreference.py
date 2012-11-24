@@ -15,6 +15,7 @@ Created on Oct 25, 2012
 '''
 tokenizer = nltk.data.load('tokenizers/punkt/english.pickle')
 lemmatizer = nltk.WordNetLemmatizer()
+names = nltk.corpus.names
 
 def input_listfile(listfile):
     
@@ -56,15 +57,8 @@ def strip_xml(crf_file):
     @param crf_file: A valid .crf crf_file path.
     """
     #rawtext = open(crf_file).read()
-    return re.sub(r"<COREF ID=\"\d+\">|</COREF>|<.*>", '', open(crf_file).read()) # Let's be concise, shall we?
+    return re.sub(r"<COREF ID=\"\d+\">|</COREF>|<.*>", '', open(crf_file).read()) 
 
-def tagger(chunked, anaphora):
-    """
-    Comprehensive tagging function. Does all kinds of neat stuff.
-    Tagged antecedents should be mapped with respect to their coreferent anaphora ID (number), a unique alpha character, and the word.
-    {'id' = <anaphor_id>, 'uid' = [A-Z], 'antecedent' = <word>}
-    """
-    pass
 
 def np_chunker(clean_text):
     """
@@ -82,82 +76,48 @@ NP: {<DT|PP\$>?<JJ>*<NN|NNS>} # chunk determiner/possessive, adjectives and noun
 """
     chunker = nltk.RegexpParser(grammar)
     return chunker.batch_parse(sentences)
-#    for sent in sentences:
-#        t = chunker.parse(sent)
-#        traverse(t)
 
-def pronoun_matcher(anaphor, antecedent):
+def pronoun_matcher(sentence, anaphor):
+    
+    global names
+#    t = chunker.parse(sentences)
+    a = [(a[0]) for a in anaphor if 'PRP' in a[1]]
+    if a: # If there exists a pronoun.
+        for u in reversed(sentence):
+            try:
+                if u.node == 'NP': #If we have an NP, check gender/number agreement.
+                    # Male pronoun agreement. Returns first agreement found.
+                    if a[0] in ['he', 'his', 'him']:
+                        male = [n for n in names.words('male.txt') if n in ''.join([_u[0] for _u in u])]
+                        if male:
+                            return ' '.join([_u[0] for _u in u.leaves() if 'NNP' in _u])
+                    # Female pronoun agreement. Returns first agreement found.
+                    elif a[0] in ['she', 'hers', 'her']:
+                        female = [n for n in names.words('female.txt') if n in ''.join([_u[0] for _u in u])]
+                        if female:
+                            return ' '.join([_u[0] for _u in u.leaves() if 'NNP' in _u])
+                    elif a[0] in ['it', 'its', 'itself']:
+                        neuter = [_u[0] for _u in u.leaves() if 'NNP' not in _u]
+                        if neuter:
+                            return ' '.join(neuter)               
+            except AttributeError:
+                continue
 
-    if 'PRP' in anaphor: 
-        if "NN" in antecedent or "NNP" in antecedent: # Singular
-            return True
-        elif "NNS" in antecedent or "NNPS" in antecedent: # Plural
-            return True
-    else:
+def is_appositive(sentence, anaphor):
+    try:
+        #If the chunk prior to the anaphor location is a NP, verify that it also contains a comma.
+        if sentence[-1].node == 'NP': # Probably should check the anaphor to ensure that is in fact a NP as well.
+            appos = [ap for ap in sentence[-1].leaves() if ',' in ap[0]]
+            if appos:
+                return True
+        else:
+            return False
+    except AttributeError:
+        return False
+    except KeyError:
         return False
 
-def string_matcher(chunked_text, anaphora):
-    """
-    Possible uses for string matching:
-    Exact matches of Proper Names
-    Common NPs can be matched, but can be risky.
-    Partial String matching is more risky.
-    Titles, abbreviations, and acronym recognition.
-    """
     
-    #Proper names:
-    
-    #Common NPs
-    
-    #Partial Matches
-    
-    #Advanced:
-    pass
-
-def hobbs_distance():
-    pass
-
-def gender_agreement():
-    """
-    Referents must agree with the gender specified by the referring expression. 
-    Animate entities are always related to male and female pronouns.
-    Inanimate entities are nonpersonal.
-    """
-    pass
-
-def number_agreement():
-    """
-    Generally, the number of items in the referent must agree with the referring expression.
-    John has a thing. They are red. # Does not agree.
-    John has a thing. It is red. # Does agree.
-    Plural = Plural, Singular = Singular.
-    """
-    pass
-
-def output_response(anaphora, tagged_antecedents, output_filename):
-    """
-    Given a list of Tagged Anaphora and antecedents, and an original input file, create a tagged output file.
-    Note: The references do not need to be placed back into the original story. They can be placed side-by-side.
-    The grading program only looks at XML tags. It doesn't care about the background story.
-    """
-    # Example output: <COREF ID="A">antecedent</COREF> <COREF ID="1" REF="A">anaphora</COREF>
-    fout = open(output_filename, "rw+")
-    # Do something else.
-    
-    pass
-
-def edit_distance(anaphor, antecedent):
-    """
-    Defined as the minimum number of character editing ops necessary to turn one string into another. 
-    TODO: Is this the same as the Levenshtein function Joel wrote last spring?
-    """
-    pass
-
-def is_appositive(anaphor, antecedent):
-    """
-    
-    """
-    pass
 
 def linguistic_form(anaphor):
     """
@@ -198,18 +158,10 @@ def centering_algorithm():
     """
     pass
 
-def log_linear():
-    """
-    Supervised machine learning approach. 
-    Train a log-linear classifier on a corpus in which the antecedents are marked for each pronoun.
-    NOTE: Probably shouldn't implement this one.
-    """
-    pass
-    
+   
 def traverse(t, anaphora):
     """
-    11/2: This concatenates each NP in the tree, and attempts to find a match in the given anaphora hash.
-    Tree traversal function for extracting NP chunks in a RegexParse'd tree.
+    Tree traversal function for extracting NP chunks in a RegexParsed tree.
     @param t: POS tagged and parsed chunk.
     """
     try:
@@ -218,59 +170,16 @@ def traverse(t, anaphora):
         return
     else:
         if t.node == 'NP': 
-#            print ' '.join([(leaf[0]) for leaf in t.leaves()])
             l = t.leaves()  # or do something else
             leaf = [(x[0]) for x in l]
             __list = ' '.join(leaf)
             anas = [(anaphor) for anaphor in anaphora if anaphor['value'] in leaf]
             if anas:
-                print anas, __list
-            
-                
-               
+                print anas, __list     
+
         else:
             for child in t:
                 traverse(child, anaphora)
-        
-                
-#==============================================================================
-# Test Functions
-#==============================================================================
-def test_xml():
-    res = []
-    rawtext = open("devset/input/1.crf").read() 
-    mat = re.findall(r"<COREF ID=\"(\d+)\">(.*?)</COREF>", rawtext)
-    #for m in mat:
-    res = [({"ID":int(m[0]), 'value':m[1]}) for m in re.findall(r"<COREF ID=\"(\d+)\">(.*?)</COREF>", rawtext)]
-    return res
-
-
-def test_nltk():
-    t = nltk.Tree
-    anaphora = test_xml()
-#    print anaphora
-    rawtext = open("devset/input/1.crf").read()
-    sentences = nltk.sent_tokenize(rawtext)
-    sentences = [nltk.word_tokenize(sent) for sent in sentences]
-    sentences = [nltk.pos_tag(sent) for sent in sentences]
-    for s in sentences:
-        for a in anaphora:
-            if a['value'] in s[0]:
-                print a['value'], ":\t", s
-    grammar = r"""
-NP: {<DT|PP\$>?<JJ>*<NN|NNS>} # chunk determiner/possessive, adjectives and nouns
-{<NNP>+} # chunk sequences of proper nouns
-
-"""
-
-    np_list = []
-    chunker = nltk.RegexpParser(grammar)
-    parsed = chunker.batch_parse(sentences)
-    print parsed    
-    for sent in parsed:
-        t = chunker.parse(sent)
-        pp(t)
-        traverse(sent, anaphora)
 
 def each_with_tail(seq):
     i = 0
@@ -296,7 +205,9 @@ def features(anaphor, potential_antecedent):
         'REF': potential_antecedent['ID'],
         'word_match': any_word_matches_p(anaphor, potential_antecedent),
         'sentence_distance': sentence_distance(anaphor, potential_antecedent),
-        'distance': distance(anaphor, potential_antecedent)}
+        'distance': distance(anaphor, potential_antecedent),
+        'is_appositive' : is_appositive(potential_antecedent, anaphor),
+        'pronoun' : pronoun_matcher(potential_antecedent, anaphor)}
 
 def coreferent_pairs_features(anaphora):
     refs = dict()
@@ -338,7 +249,48 @@ def resolve_file(input_path, response_dir_path):
 def resolve_files(files, response_dir_path):
     for file in files:
         resolve_file(file, response_dir_path)
-        
+         
+                
+#==============================================================================
+# Test Functions
+#==============================================================================
+def test_xml():
+    res = []
+    rawtext = open("devset/input/1.crf").read() 
+    mat = re.findall(r"<COREF ID=\"(\d+)\">(.*?)</COREF>", rawtext)
+    #for m in mat:
+    res = [({"ID":int(m[0]), 'value':m[1]}) for m in re.findall(r"<COREF ID=\"(\d+)\">(.*?)</COREF>", rawtext)]
+    return res
+
+
+def test_nltk():
+    t = nltk.Tree
+    anaphora = test_xml()
+#    print anaphora
+    rawtext = open("devset/input/1.crf").read()
+    sentences = nltk.sent_tokenize(rawtext)
+    sentences = [nltk.word_tokenize(sent) for sent in sentences]
+    sentences = [nltk.pos_tag(sent) for sent in sentences]
+    for s in sentences:
+        for a in anaphora:
+            if a['value'] in s[0]:
+                print a['value'], ":\t", s
+    grammar = r"""
+NP: {<DT|PP\$>?<JJ>*<NN|NNS>} # chunk determiner/possessive, adjectives and nouns
+{<NNP>+} # chunk sequences of proper nouns
+
+"""
+
+    np_list = []
+    chunker = nltk.RegexpParser(grammar)
+    parsed = chunker.batch_parse(sentences)
+    print parsed    
+    for sent in parsed:
+        t = chunker.parse(sent)
+        pp(t)
+        traverse(sent, anaphora)
+
+       
 #===============================================================================
 # Main
 #===============================================================================
