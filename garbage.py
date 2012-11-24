@@ -1,58 +1,21 @@
 import os
 from pprint import pprint as pp
 import sys, nltk, re
+import nltk.chunk
+import itertools
+from inspect import Attribute
+from pickle import FALSE
 
-def hobbs_algorithm():
-    """
-    1. Begin at the NP mode immediately dominating the pronoun.
-    2. Go up the tree to the first NP or S node encountered. Call this node X and call the path used to reach it P.
-    3. Traverse all branches below node X to the left of path p in a left-to-right BFS fashion. Propose as the antecedent any encountered NP node that has an NP or S node between it and X.
-    4. If node X is the highest S node in the sentence, traverse the surface parse trees of previous sentences in the text in order of recency, most recent first. 
-        Each tree is traversed in a left-to-right BFS and when an NP node is encountered it is proposed as antecedent. 
-        If X is not the highest S node in the sentence, continue to step 5.
-    5. From node X, go up the tree to the first NP or S node encountered. Call this new node X and the path traversed to reach it P.
-    6. If X is an NP node and if the path P to X did not pass through the Nominal node that X immediately dominates, propose X as the antecedent.
-    7. Traverse all branches below node X to the left of path P in a left to right BFS. Propose any NP node encountered as the antecedent.
-    8. If X is an S node, traverse all branches of node X to the right of path P in a left-to-right BFS, but do not go below any NP or S node encountered. Propose any NP node encountered as the antecedent.
-    9. Go to step 4.
-    """
-    pass
-
-def traverse(t, anaphora):
-    try:
-        t.node
-    except AttributeError:
-        return
-    else:
-        if t.node == 'NP': 
-            print ' '.join([(leaf[0]) for leaf in t.leaves()])
-#            l = t.leaves()  # or do something else
-#            leaf = [(x[0]) for x in l]
-#            __list = ' '.join(leaf)
-#            anas = [(anaphor) for anaphor in anaphora if anaphor['value'] in leaf]
-#            if anas:
-#                print anas, __list
-        else:
-            for child in t:
-                traverse(child, anaphora)
-                
 def test_xml():
     rawtext = open("devset/input/1.crf").read() 
     res = [({"ID":int(m[0]), 'value':m[1]}) for m in re.findall(r"<COREF ID=\"(\d+)\">(.*?)</COREF>", rawtext)]
     return res
 
 def test_nltk(anaphora):
-    """
-    Given: Parsed text, optionally POS tagged.
-    """
-    rawtext = open("devset/raw/1.txt").read()
+    rawtext = open("devset/input/1.crf").read()
     sentences = nltk.sent_tokenize(rawtext)
     sentences = [nltk.word_tokenize(sent) for sent in sentences]
     sentences = [nltk.pos_tag(sent) for sent in sentences]
-#    for s in sentences:
-#        for a in anaphora:
-#            if a['value'] in s[0]:
-#                print a['value'], ":\t", s
     grammar = r"""
 NP: {<DT|PP\$>?<JJ>*<NN|NNS>} # chunk determiner/possessive, adjectives and nouns
 {<NNP>+} # chunk sequences of proper nouns
@@ -65,7 +28,7 @@ NP: {<DT|PP\$>?<JJ>*<NN|NNS>} # chunk determiner/possessive, adjectives and noun
         t = chunker.parse(sent)
         t = t.flatten()
         u = [(i, val) for i, val in enumerate(t) if "PRP" in val]
-        for i,_u in u:
+        for i, _u in u:
             for nn in t[:i]:
                 if "NN" in nn or "NNS" in nn or "NNP" in nn or "NNPS" in nn:
                     for a in anaphora:
@@ -82,10 +45,47 @@ def dummy():
 
 def findtags(tag_prefix, tagged_text):
     cfd = nltk.ConditionalFreqDist((tag, word) for (word, tag) in tagged_text
-                                  if tag == tag_prefix)
-    
+                                  if tag == tag_prefix)  
     return dict((tag, cfd[tag].keys()[:]) for tag in cfd.conditions())
 
+def appositive(sentences, anaphor):
+
+    t = chunker.parse(sentences)
+    a = [(a[0]) for a in anaphor if 'PRP' in a[1]]
+    if a: # If there exists a pronoun.
+        for u in reversed(t):
+            try:
+                if u.node == 'NP': #If we have an NP, check gender/number agreement.
+                    if a[0] in ['he', 'his', 'him']:
+                        male = [n for n in names.words('male.txt') if n in ''.join([_u[0] for _u in u])]
+                        if male:
+                            return ' '.join([_u[0] for _u in u.leaves() if 'NNP' in _u])
+                    elif a[0] in ['she', 'hers', 'her']:
+                        female = [n for n in names.words('female.txt') if n in ''.join([_u[0] for _u in u])]
+                        if female:
+                            return ' '.join([_u[0] for _u in u.leaves() if 'NNP' in _u])
+                    elif a[0] in ['it', 'its', 'itself']:
+                        neuter = [_u[0] for _u in u.leaves() if 'NNP' not in _u]
+                        if neuter:
+                            return ' '.join(neuter)               
+            except AttributeError:
+                continue
+
+        
+    
+           
 if __name__ == '__main__':
-    anaphora = test_xml()
-    test_nltk(anaphora)
+#    anaphora = test_xml()
+#    test_nltk(anaphora)
+    names = nltk.corpus.names
+    grammar = r"""
+NP: {<DT|PP\$>?<JJ>*<NN|NNS>} # chunk determiner/possessive, adjectives and nouns
+{<NNP>+} # chunk sequences of proper nouns
+
+"""
+    chunker = nltk.RegexpParser(grammar)
+    sentence = "As senior director of UAL, and a member of the executive committee of its board, I am appalled at the inaccuracies and anti-management bias in the Journal's April 17 article about Richard Ferris, "
+    ana = "he"
+    sentences = nltk.pos_tag(sentence.split())
+    anaphor = nltk.pos_tag(ana.split())
+    print appositive(sentences, anaphor)
