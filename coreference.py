@@ -13,9 +13,40 @@ Created on Oct 25, 2012
 @author: Joel Hough
 
 '''
-tokenizer = nltk.data.load('tokenizers/punkt/english.pickle')
+sentence_tokenizer = nltk.data.load('tokenizers/punkt/english.pickle')
+word_tokenizer = nltk.tokenize.punkt.PunktWordTokenizer()
 lemmatizer = nltk.WordNetLemmatizer()
+tagger = nltk.RegexpTagger([(r'coref_tag_beg_.*', 'CRB'), (r'coref_tag_end_.*', 'CRE')], backoff=nltk.data.load('taggers/maxent_treebank_pos_tagger/english.pickle'))
 names = nltk.corpus.names
+coref_tag_re = r'(?is)<COREF ID="(\w+)">(.*?)</COREF>'
+coref_token_re = r'(?is)coref_tag_beg_(\w+)(.*?)coref_tag_end_\1'
+
+def lemmatize(word):
+    return lemmatizer.lemmatize(word)
+
+def pos_tag(text):
+    return tagger.tag(text)
+
+def word_tokenize(text):
+    return word_tokenizer.tokenize(text)
+
+def sentence_tokenize(text, no_break_zones=[]):
+    spans = sentence_tokenizer.span_tokenize(text)
+    return sentence_tokenizer._realign_boundaries(text[slice(start, end)] for start, end in adjust_spans(spans, no_break_zones))
+
+def adjust_spans(spans, no_break_zones):
+    def valid_break(pos):
+        for (start, end) in no_break_zones:
+            if pos >= start and pos <= end:
+                return False
+        return True
+    
+    new_spans = []
+    new_start = 0
+    for start, end in spans:
+        if valid_break(end):
+            yield (new_start, end)
+            new_start = end
 
 def input_listfile(listfile):
     
@@ -34,23 +65,23 @@ def count_sentences(text):
     """
     An _approximate_ count of sentences in the text.
     """
-    global tokenizer
-    return len(tokenizer.tokenize(text.strip()))
+    global sentence_tokenizer
+    return len(sentence_tokenizer.tokenize(text.strip()))
 
 def get_anaphora(text):
     """
-    Obtains all valid XML-tagged anaphora from a given input file.
-    @param text: Valid XML-tagged (<COREF ID=\d> </COREF>) file.
+    Get a list of information about anaphora in the given text
+    @param text: text with anaphors marked with coref_tag_* tokens.
     """
-    global tokenizer
-    # I don't know that I trust the tokenizer to not split between tags, so I don't depend on it not doing it
-    corefs = dict((m.groups()[0], {'ID':m.groups()[0], 'value':m.groups()[1], 'position':m.start()}) for m in re.finditer(r'<COREF ID="(\w+)">(.*?)</COREF>', text, re.DOTALL | re.MULTILINE))
-    i = 0
-    for sentence in tokenizer.tokenize(text.strip()):
-        for id in re.findall(r'<COREF ID="(\w+)">', sentence):
-            corefs[id].update({'sentence_position': i, 'sentence': sentence})
-            i += 1
-    return corefs.values()
+    corefs = []
+    for i, sentence in enumerate(sentence_tokenize(text)):
+        corefs += [{'ID':m.groups()[0],
+                    'value':m.groups()[1],
+                    'position': m.start(),
+                    'sentence_position': i,
+                    'sentence': sentence} for m in re.finditer(coref_token_re, sentence)]
+
+    return corefs
 
 def get_anaphora_with_periods(anaphora):
     return [(a['value']) for a in anaphora if '.' in a['value']]    
@@ -196,9 +227,6 @@ def each_with_tail(seq):
         i += 1
         yield (l[i - 1], l[i:])
 
-def lemmatize(word):
-    return lemmatizer.lemmatize(word)
-    
 def any_word_matches_p(anaphor, potential_antecedent):
     return any(word for word in anaphor['value'].split() if lemmatize(word.lower()) in map(lambda w: lemmatize(w.lower()), potential_antecedent['value'].split()))
 
@@ -240,24 +268,57 @@ def update_refs(text, refs):
 
     return new_text
 
-def resolve_file(input_path, response_dir_path):
-    name = os.path.splitext(os.path.basename(input_path))[0]
-    output_path = os.path.join(response_dir_path, name + '.response')
+def replace_coref_tags_with_tokens(text):
+    return re.sub(coref_tag_re, r' coref_tag_beg_\1 \2 coref_tag_end_\1 ', text)
 
-    text = re.sub(r'\s+', ' ', open(input_path, 'r').read(), re.DOTALL | re.MULTILINE)
-    
+def no_break_zones(text):
+    for match in re.finditer(coref_token_re, text):
+        yield match.span()
+
+def coref_abbrs(text):
+    for match in re.finditer(coref_token_re, text):
+        for word in word_tokenize(match.groups()[1]):
+            if word[-1] == '.':
+                yield word
+
+def resolve_text(text):
     anaphora = get_anaphora(text)
-
     refs = feature_resolver(anaphora)
-    
     resolved_text = update_refs(text, refs)
+    return resolved_text
+    
+def read_text(file):
+    return open(file, 'r').read()
 
-    open(output_path, 'w').write(resolved_text)
+def filename(file):
+    return os.path.splitext(os.path.basename(file))[0]
 
 def resolve_files(files, response_dir_path):
+    # extract text, preprocess, and train sentence_tokenizer
+    to_resolve = []
     for file in files:
-        resolve_file(file, response_dir_path)
-         
+        name = filename(file)
+        text = read_text(file)
+        detagged_text = re.sub(r'(?is)</?TXT>', '', replace_coref_tags_with_tokens(text))
+        print 'TEXT'
+        print detagged_text
+        to_resolve.append((name, detagged_text))
+        abbrs = coref_abbrs(detagged_text)
+        print 'ABBRS'
+        print list(abbrs)
+        # add abbrs to sentence_tokenizer
+
+    for name, text in to_resolve:
+        output_path = os.path.join(response_dir_path, name + '.response')
+        coref_zones = no_break_zones(text)
+        print 'COREF ZONES'
+        print list(coref_zones)
+        sentences = sentence_tokenize(text, coref_zones)
+        for sentence in sentences:
+            print 'POS'
+            print pos_tag(word_tokenize(sentence))
+            
+            #open(output_path, 'w').write(resolved_text)
                 
 #==============================================================================
 # Test Functions
