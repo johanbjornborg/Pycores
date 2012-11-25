@@ -158,6 +158,8 @@ def is_appositive(potential_antecedent, anaphor):
         return False
     except KeyError:
         return False 
+    except ValueError:
+        return False
 
 def linguistic_form(anaphor):
     """
@@ -181,7 +183,6 @@ def edit_distance(anaphor, potential_antecedent):
             dist += levenshtein(ana[i], ant[i])
     return dist 
 
-##
 def levenshtein(s1, s2):
     if len(s2) == 0:
         return len(s1)
