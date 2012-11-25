@@ -1,5 +1,6 @@
 import os
 from pprint import pprint as pp
+from math import fabs
 import sys, nltk, re
 import xml.sax.saxutils as saxutils
 
@@ -112,18 +113,14 @@ def pronoun_matcher(potential_antecedent, anaphor):
                 continue
 
 def is_appositive(potential_antecedent, anaphor):
-    
     try:
-        sentence = anaphor['sentence']
-        #If the chunk prior to the anaphor location is a NP, verify that it also contains a comma.
-        #        print anaphor
-        if sentence[-1].node == 'NP': # Probably should check the anaphor to ensure that is in fact a NP as well.
-            appos = [ap for ap in sentence[-1].leaves() if ',' in ap[0]]
-            if appos:
+        reg = r"""{ant},\s*""".format(ant=potential_antecedent['value'], ana=anaphor['value'])
+        m = re.search(reg, anaphor['sentence'])
+        if m:
+            ana_i, ana_j = anaphor['position']
+            ant_i, ant_j = potential_antecedent['position']
+            if (ana_i == ant_i) and fabs(ana_j - ant_j) == 1:
                 return True
-        else:
-            return False
-    except AttributeError:
         return False
     except KeyError:
         return False
@@ -136,37 +133,35 @@ def linguistic_form(anaphor):
     """ 
     pass
 
-def hobbs_algorithm():
-    """
-    1. Begin at the NP mode immediately dominating the pronoun.
-    2. Go up the tree to the first NP or S node encountered. Call this node X and call the path used to reach it P.
-    3. Traverse all branches below node X to the left of path p in a left-to-right BFS fashion. Propose as the antecedent any encountered NP node that has an NP or S node between it and X.
-    4. If node X is the highest S node in the sentence, traverse the surface parse trees of previous sentences in the text in order of recency, most recent first. 
-        Each tree is traversed in a left-to-right BFS and when an NP node is encountered it is proposed as antecedent. 
-        If X is not the highest S node in the sentence, continue to step 5.
-    5. From node X, go up the tree to the first NP or S node encountered. Call this new node X and the path traversed to reach it P.
-    6. If X is an NP node and if the path P to X did not pass through the Nominal node that X immediately dominates, propose X as the antecedent.
-    7. Traverse all branches below node X to the left of path P in a left to right BFS. Propose any NP node encountered as the antecedent.
-    8. If X is an S node, traverse all branches of node X to the right of path P in a left-to-right BFS, but do not go below any NP or S node encountered. Propose any NP node encountered as the antecedent.
-    9. Go to step 4.
-    """
-    pass
+def edit_distance(anaphor, potential_antecedent):
+    ana = anaphor['value'].split()
+    ant = potential_antecedent['value'].split()
+    dist = 0
+    if len(ana) < len(ant):
+        return edit_distance(potential_antecedent, anaphor)
 
-def centering_algorithm():
-    """
-    Reference: Centering theory, entity-based coherence. Page 706.
-    
-    RULES: 
-        1. If any element of Cf(Un) is realized by a pronoun in utterance Un+1 then Cb(Un+1) must be realized as a pronoun also.
-        2. Transition states are ordered. Continue is preferred to Retain is preferred to Smooth-Shift is preferred to Rough-Shift.
-        
-    Algorithm:
-        1. Generate possible (Cb,Cf) combinations for each possible set of reference assignments.
-        2. Filter by constraints. For example, syntactic coreference constraints, selectional restrictions, centering rules, and constraints.
-        3. Rank by transition orderings.
-    """
-    pass
-   
+    for i in range(0, len(ana)):
+        if i >= len(ant):
+            dist += levenshtein(ana[i], "")
+        else:
+            dist += levenshtein(ana[i], ant[i])
+    return dist 
+
+##
+def levenshtein(s1, s2):
+    if len(s2) == 0:
+        return len(s1)
+    previous_row = xrange(len(s2) + 1)
+    for i, c1 in enumerate(s1):
+        current_row = [i + 1]
+        for j, c2 in enumerate(s2):
+            insertions = previous_row[j + 1] + 1 
+            deletions = current_row[j] + 1       
+            substitutions = previous_row[j] + (c1 != c2)
+            current_row.append(min(insertions, deletions, substitutions))
+        previous_row = current_row
+    return previous_row[-1]
+
 def each_with_tail(seq):
     i = 0
     l = list(seq)
@@ -192,6 +187,7 @@ def features(anaphor, potential_antecedent):
         'sentence_distance': sentence_distance(anaphor, potential_antecedent),
         'distance': distance(anaphor, potential_antecedent),
         'is_appositive' : is_appositive(potential_antecedent, anaphor),
+        'edit_distance' : edit_distance(anaphor, potential_antecedent),
 #        'pronoun' : pronoun_matcher(potential_antecedent, anaphor)
         }
 
