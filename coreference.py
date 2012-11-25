@@ -1,6 +1,8 @@
 import os
 from pprint import pprint as pp
 import sys, nltk, re
+import xml.sax.saxutils as saxutils
+
 '''
 Coreference Resolution
 Created on Oct 25, 2012
@@ -13,25 +15,37 @@ Created on Oct 25, 2012
 @author: Joel Hough
 
 '''
+class Memoize:
+    def __init__(self, f):
+        self.f = f
+        self.memo = {}
+    def __call__(self, *args):
+        if not args in self.memo:
+            self.memo[args] = self.f(*args)
+        return self.memo[args]
+
 sentence_tokenizer = nltk.data.load('tokenizers/punkt/english.pickle')
 word_tokenizer = nltk.tokenize.punkt.PunktWordTokenizer()
 lemmatizer = nltk.WordNetLemmatizer()
-tagger = nltk.RegexpTagger([(r'coref_tag_beg_.*', 'CRB'), 
-                            (r'coref_tag_end_.*', 'CRE'),
+tagger = nltk.RegexpTagger([(r'.*coref_tag_beg_.*', 'CRB'), 
+                            (r'.*coref_tag_end_.*', 'CRE'),
                             (r'\$[0-9]+(.[0-9]+)?', 'NN')], backoff=nltk.data.load('taggers/maxent_treebank_pos_tagger/english.pickle'))
 names = nltk.corpus.names
 coref_tag_re = r'(?is)<COREF ID="(\w+)">(.*?)</COREF>'
-coref_token_re = r'(?is)coref_tag_beg_(\w+)(.*?)coref_tag_end_\1'
+coref_token_re = r'(?is)coref_tag_beg_(\w+)_(.*?)coref_tag_end_\1_'
 chunker_grammar = r"""
 NP:
 {<CRB>(<.*>+?)<CRE>}
 {<DT|PP\$>?<JJ>*<NN.*>+} # chunk determiner/possessive, adjectives and nouns
+{<WP.*>}
+{<PRP.*>}
 """
 chunker = nltk.RegexpParser(chunker_grammar)
 
 def chunk(sentence):
     return chunker.parse(sentence)
-    
+
+@Memoize
 def lemmatize(word):
     return lemmatizer.lemmatize(word)
 
@@ -47,37 +61,19 @@ def sentence_tokenize(text, no_break_zones=[]):
 
 def adjust_spans(spans, no_break_zones):
     def valid_break(pos):
-        for (start, end) in no_break_zones:
+        #print list(no_break_zones)
+        for start, end in no_break_zones:
             if pos >= start and pos <= end:
                 return False
         return True
     
-    new_spans = []
-    new_start = 0
+    new_start = -1
     for start, end in spans:
+        if new_start == -1:
+            new_start = start
         if valid_break(end):
             yield (new_start, end)
-            new_start = end
-
-def input_listfile(listfile):
-    
-    file_list = []
-    
-    if(listfile is None):
-        sys.exit("No listfile detected. Exiting.")
-    else:
-        fin = open(listfile)
-    for line in fin.readlines():
-        file_list.append(line)
-    
-    return file_list
-
-def count_sentences(text):
-    """
-    An _approximate_ count of sentences in the text.
-    """
-    global sentence_tokenizer
-    return len(sentence_tokenizer.tokenize(text.strip()))
+            new_start = -1
 
 def get_anaphora(text):
     """
@@ -87,35 +83,6 @@ def get_anaphora(text):
     return [{'ID':m.groups()[0],
              'value':m.groups()[1],
              'position': m.start()} for m in re.finditer(coref_token_re, text)]
-
-def get_anaphora_with_periods(anaphora):
-    return [(a['value']) for a in anaphora if '.' in a['value']]    
-
-def strip_xml(crf_file):
-    """
-    Strips the XML-style tags from a given .crf input crf_file path.
-    @param crf_file: A valid .crf crf_file path.
-    """
-    #rawtext = open(crf_file).read()
-    return re.sub(r"<COREF ID=\"\d+\">|</COREF>|<.*>", '', open(crf_file).read()) 
-
-
-def np_chunker(clean_text):
-    """
-    Given an XML-free string, break up the input into NP chunks.
-    @param clean_text: 
-    """
-    
-    sentences = nltk.sent_tokenize(clean_text)
-    sentences = [nltk.word_tokenize(sent) for sent in sentences]
-    sentences = [nltk.pos_tag(sent) for sent in sentences]
-
-    grammar = r"""
-NP: {<DT|PP\$>?<JJ>*<NN|NNS>} # chunk determiner/possessive, adjectives and nouns
-{<NNP>+} # chunk sequences of proper nouns
-"""
-    chunker = nltk.RegexpParser(grammar)
-    return chunker.batch_parse(sentences)
 
 def pronoun_matcher(potential_antecedent, anaphor):
     sentence = anaphor['sentence']
@@ -161,8 +128,6 @@ def is_appositive(potential_antecedent, anaphor):
     except KeyError:
         return False
 
-    
-
 def linguistic_form(anaphor):
     """
     Returns the form of the potential anaphor NP_j.
@@ -201,30 +166,7 @@ def centering_algorithm():
         3. Rank by transition orderings.
     """
     pass
-
    
-def traverse(t, anaphora):
-    """
-    Tree traversal function for extracting NP chunks in a RegexParsed tree.
-    @param t: POS tagged and parsed chunk.
-    """
-    try:
-        t.node
-    except AttributeError:
-        return
-    else:
-        if t.node == 'NP': 
-            l = t.leaves()  # or do something else
-            leaf = [(x[0]) for x in l]
-            __list = ' '.join(leaf)
-            anas = [(anaphor) for anaphor in anaphora if anaphor['value'] in leaf]
-            if anas:
-                print anas, __list     
-
-        else:
-            for child in t:
-                traverse(child, anaphora)
-
 def each_with_tail(seq):
     i = 0
     l = list(seq)
@@ -253,16 +195,16 @@ def features(anaphor, potential_antecedent):
 #        'pronoun' : pronoun_matcher(potential_antecedent, anaphor)
         }
 
-def coreferent_pairs_features(anaphora):
+def coreferent_pairs_features(corefs):
     refs = dict()
-    for anaphor, potential_antecedents in each_with_tail(sorted(anaphora, key=lambda a:a['position'], reverse=True)):
-        if not anaphor['is_anaphor']:
+    for coref, potential_antecedents in each_with_tail(sorted(corefs, key=lambda a:a['position'], reverse=True)):
+        if not coref['is_anaphor']:
             continue
-        refs[anaphor['ID']] = [features(anaphor, potential_antecedent) for potential_antecedent in potential_antecedents]
+        refs[coref['ID']] = [features(coref, potential_antecedent) for potential_antecedent in potential_antecedents]
     return refs
 
-def feature_resolver(anaphora):
-    features = coreferent_pairs_features(anaphora)
+def feature_resolver(corefs):
+    features = coreferent_pairs_features(corefs)
     for id in features:
         matches = filter(lambda f: f['word_match'], features[id])
         if matches:
@@ -279,20 +221,19 @@ def update_refs(text, refs):
     return new_text
 
 def replace_coref_tags_with_tokens(text):
-    return re.sub(coref_tag_re, r' coref_tag_beg_\1 \2 coref_tag_end_\1 ', text)
+    return re.sub(coref_tag_re, r' coref_tag_beg_\1_ \2 coref_tag_end_\1_ ', text)
 
 def replace_coref_tokens_with_tags(text):
     return re.sub(coref_token_re, r'<COREF ID="\1">\2</COREF>', text)
 
 def no_break_zones(text):
-    for match in re.finditer(coref_token_re, text):
-        yield match.span()
+    return [match.span() for match in re.finditer(coref_token_re, text)]
 
 def coref_abbrs(text):
-    for match in re.finditer(coref_token_re, text):
-        for word in word_tokenize(match.groups()[1]):
-            if word[-1] == '.':
-                yield word
+    return [word 
+            for match in re.finditer(coref_token_re, text)
+            for word in word_tokenize(match.groups()[1])
+            if word[-1] == '.']
 
 def read_text(file):
     return open(file, 'r').read()
@@ -300,130 +241,126 @@ def read_text(file):
 def filename(file):
     return os.path.splitext(os.path.basename(file))[0]
 
-def resolve_files(files, response_dir_path):
-    # extract text, preprocess, and train sentence_tokenizer
+def teach_abbreviations_to_tokenizer(abbrs):
+    global sentence_tokenizer
+    sentence_tokenizer._params.abbrev_types |= set(abbrs)
+
+def get_text_from_files(files):
     to_resolve = []
     for file in files:
         name = filename(file)
         text = read_text(file)
-        detagged_text = re.sub(r'(?is)</?TXT>', '', replace_coref_tags_with_tokens(text))
-        #print 'TEXT'
-        #print detagged_text
-        to_resolve.append((name, detagged_text))
-        abbrs = coref_abbrs(detagged_text)
-        #print 'ABBRS'
-        #print list(abbrs)
-        # add abbrs to sentence_tokenizer
+        to_resolve.append((name, text))
+    return to_resolve
 
-    for name, text in to_resolve:
-        class Gensym:
-            i = 0
-            def __call__(self):
-                self.i += 1
-                return 'X{0}'.format(self.i)
+class Gensym:
+    i = 0
+    def reset(self):
+        self.i = 0
 
-        gensym = Gensym()
-        coref_zones = no_break_zones(text)
-        #print 'COREF ZONES'
-        #print list(coref_zones)
+    def __call__(self):
+        self.i += 1
+        return 'X{0}'.format(self.i)
+
+def resolve_files(files, response_dir_path):
+    gensym = Gensym()
+    def write_response(name, text):
+        output_path = os.path.join(response_dir_path, name + '.response')
+        open(output_path, 'w').write(text)
+
+    def untagged_phrase(tagged_tokens):
+        return ' '.join(word for word, tag in tagged_tokens)
+
+    def tag_as_new_coref(noun_phrase):
+        def surround_with_coref_tokens(tokens, ident):
+            tokens.insert(0, ('coref_tag_beg_{0}_'.format(ident), 'CRB'))
+            tokens.append(('coref_tag_end_{0}_'.format(ident), 'CRE'))
+            
+        def move_last_period_out_of_coref_tag(tokens):
+            tag = tokens[-1]
+            last_word = tokens[-2]
+            if last_word[0][-1] == '.':
+                tokens[-2] = (last_word[0][:-1], last_word[1])
+                tokens[-1] = (tag[0] + '.', tag[1])
+
+        surround_with_coref_tokens(noun_phrase, gensym())
+        #move_last_period_out_of_coref_tag(noun_phrase)
+
+    def is_anaphor(tokens):
+        word, tag = tokens[0]
+        return tag == 'CRB'
+
+    def coref_from_noun_phrase(noun_phrase):
+        def phrase_without_coref_tokens(noun_phrase):
+            return noun_phrase[1:-1]
+
+        def get_id(tokens):
+            word, tag = tokens[0]
+            return re.match(r'coref_tag_beg_(\w+)_', word).group(1)
+
+        tagged_value = phrase_without_coref_tokens(noun_phrase)
+
+        return {
+            'ID': get_id(noun_phrase),
+            'value': untagged_phrase(tagged_value),
+            'tagged_value': tagged_value
+            }
+    
+    def add_coref_data(coref, data):
+        coref.update(data)
+
+    documents_to_resolve = []
+    for name, text in get_text_from_files(files):
+        detagged_text = text
+        detagged_text = re.sub(r'(?is)</?TXT>', '', detagged_text)
+        detagged_text = replace_coref_tags_with_tokens(detagged_text)
+        detagged_text = saxutils.unescape(detagged_text)
+        documents_to_resolve.append((name, detagged_text))
+
+    for _, text in documents_to_resolve:
+        teach_abbreviations_to_tokenizer(coref_abbrs(text))
+        
+    for document_name, text in documents_to_resolve:
+        gensym.reset()
         corefs = []
         np_tagged_sentences = []
-        sentences = sentence_tokenize(text, coref_zones)
+        sentences = sentence_tokenize(text, no_break_zones(text))
         for i_sentence, sentence in enumerate(sentences):
+            #            print sentence
             tokenized_sentence = word_tokenize(sentence)
             tagged_sentence = pos_tag(tokenized_sentence)
-            #            print 'CHUNKED'
+            #if 'we' in tokenized_sentence:
+            #    print tagged_sentence
             chunked_sentence = chunk(tagged_sentence)
-            #            print chunked_sentence
             
-            for i_subtree, subtree in enumerate(chunked_sentence.subtrees(filter=lambda s: s.node == 'NP')):
-                word, tag = subtree[0]
-                if tag == 'CRB':
-                    ident = re.match(r'coref_tag_beg_(\w+)', word).group(1)
-                    anaphor = True
-                    del subtree[0]
-                    del subtree[-1]
-                else:
-                    ident = gensym()
-                    anaphor = False
-                tagged_value = subtree[:]
-                value = ' '.join(word for word, tag in tagged_value)
-                subtree.insert(0, ('coref_tag_beg_{0}'.format(ident), 'CRB'))
-                subtree.append(('coref_tag_end_{0}'.format(ident), 'CRE'))
+            for i_noun_phrase, noun_phrase in enumerate(chunked_sentence.subtrees(filter=lambda s: s.node == 'NP')):
+                #                print noun_phrase
+                was_an_anaphor = is_anaphor(noun_phrase)
+                if not was_an_anaphor:
+                    tag_as_new_coref(noun_phrase)
+                    
+                coref = coref_from_noun_phrase(noun_phrase)
+                
+                add_coref_data(coref, {
+                    'is_anaphor': was_an_anaphor,
+                    'position': (i_sentence, i_noun_phrase),
+                    'tokenized_sentence': tokenized_sentence,
+                    'tagged_sentence': tagged_sentence,
+                    'chunked_sentence': chunked_sentence,
+                    'sentence': sentence
+                })
+                corefs.append(coref)
+            np_tagged_sentences.append(untagged_phrase(chunked_sentence.leaves()))
 
-                def move_last_period_out_of_coref_tag(tree):
-                    tag = tree[-1]
-                    last_word = tree[-2]
-                    #print 'TAG:{0}, WORD:{1}'.format(tag, last_word)
-                    if last_word[0][-1] == '.':
-                        tree[-2] = (last_word[0][:-1], last_word[1])
-                        tree[-1] = (tag[0] + '.', tag[1])
-                move_last_period_out_of_coref_tag(subtree)
-                corefs.append({'ID': ident,
-                               'position': (i_sentence, i_subtree),
-                               'is_anaphor': anaphor,
-                               'value': value,
-                               'tagged_value': tagged_value,
-                               'tokenized_sentence': tokenized_sentence,
-                               'tagged_sentence': tagged_sentence,
-                               'chunked_sentence': chunked_sentence,
-                               'sentence': sentence
-                               })
-            #print 'TREE'
-            #print chunked_sentence
-            #print 'FLAT'
-            #print chunked_sentence.leaves()
-            np_tagged_sentences.append(' '.join(word for word, tag in chunked_sentence.leaves()))
-        #print 'TAGGED'
-        tagged_text = '<TXT>' + replace_coref_tokens_with_tags("\n".join(np_tagged_sentences)) + '</TXT>'
+        tagged_text = "\n".join(np_tagged_sentences)
+        tagged_text = saxutils.escape(tagged_text)
+        tagged_text = replace_coref_tokens_with_tags(tagged_text)
+        tagged_text = '<TXT>' + tagged_text + '</TXT>\n'
         refs = feature_resolver(corefs)
         resolved_text = update_refs(tagged_text, refs)
-        #print resolved_text
-        #            print list(refs)
-        #     anaphora.append(anaphor)
-        output_path = os.path.join(response_dir_path, name + '.response')
-        open(output_path, 'w').write(resolved_text)
-                
-#==============================================================================
-# Test Functions
-#==============================================================================
-def test_xml():
-    res = []
-    rawtext = open("devset/input/1.crf").read() 
-    mat = re.findall(r"<COREF ID=\"(\d+)\">(.*?)</COREF>", rawtext)
-    #for m in mat:
-    res = [({"ID":int(m[0]), 'value':m[1]}) for m in re.findall(r"<COREF ID=\"(\d+)\">(.*?)</COREF>", rawtext)]
-    return res
-
-
-def test_nltk():
-    t = nltk.Tree
-    anaphora = test_xml()
-#    print anaphora
-    rawtext = open("devset/input/1.crf").read()
-    sentences = nltk.sent_tokenize(rawtext)
-    sentences = [nltk.word_tokenize(sent) for sent in sentences]
-    sentences = [nltk.pos_tag(sent) for sent in sentences]
-    for s in sentences:
-        for a in anaphora:
-            if a['value'] in s[0]:
-                print a['value'], ":\t", s
-    grammar = r"""
-NP: {<DT|PP\$>?<JJ>*<NN|NNS>} # chunk determiner/possessive, adjectives and nouns
-{<NNP>+} # chunk sequences of proper nouns
-
-"""
-
-    np_list = []
-    chunker = nltk.RegexpParser(grammar)
-    parsed = chunker.batch_parse(sentences)
-    print parsed    
-    for sent in parsed:
-        t = chunker.parse(sent)
-        pp(t)
-        traverse(sent, anaphora)
-
-       
+        
+        write_response(document_name, resolved_text)
+        
 #===============================================================================
 # Main
 #===============================================================================
@@ -434,19 +371,10 @@ def main():
     files = [l.strip() for l in open(listfile_path, 'r').readlines()]
 
     resolve_files(files, response_dir_path)
-    # file_list = input_listfile(list_file) # Obtain the list of filenames to coreference-ate 
-
-    # for crf_file in file_list:
-    #     tagged_anaphora = get_anaphora(crf_file) # Get the anaphora and ID's from file.
-    #     clean_text = strip_xml(crf_file) # Remove XML tagging
-    #     chunked = np_chunker(clean_text) # Chunk the text into Trees.
-    #     tagged_antecedents = tagger(chunked) # Start the tagger. 
-        
-    
 
 if __name__ == '__main__':
     main()
-#    test_nltk()
-#    test_xml()
+    #cProfile.run('main()')
+
 
 
