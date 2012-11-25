@@ -93,12 +93,40 @@ def fix_span_breaks(str_idx, pairs):
         if len(inter) == 2: 
             span.append((low,hi))
     print span
-    
+
+def edit_distance(anaphor, potential_antecedent):
+    ana = anaphor['value'].split()
+    ant = potential_antecedent['value'].split()
+    dist = 0
+    if len(ana) < len(ant):
+        return edit_distance(potential_antecedent, anaphor)
+   
+    for i in range(0,len(ana)):
+        if i >= len(ant):
+            print "empty"
+            dist += levenshtein(ana[i], "")
+        else:
+            dist += levenshtein(ana[i], ant[i])
+    return dist 
+
+def levenshtein(s1, s2):
+    if len(s2) == 0:
+        return len(s1)
+    previous_row = xrange(len(s2) + 1)
+    for i, c1 in enumerate(s1):
+        current_row = [i + 1]
+        for j, c2 in enumerate(s2):
+            insertions = previous_row[j + 1] + 1 # j+1 instead of j since previous_row and current_row are one character longer
+            deletions = current_row[j] + 1       # than s2
+            substitutions = previous_row[j] + (c1 != c2)
+            current_row.append(min(insertions, deletions, substitutions))
+        previous_row = current_row
+    return previous_row[-1]
+
 if __name__ == '__main__':
-    idx = [(0,26),(27,92),(93,111),(112,148),(149,188)]
-    pairs = [(23,34),(45,60),(97,105),(110,126),(144,155)]
-    #OUTPUT: 0-92, 93-188
-    fix_span_breaks(idx, pairs)
+    s1 = {'value' : "Creutzfeldt-Jakob"}
+    s2 = {'value' : "Creutzfeldt-Jacob Disease"}
+    print edit_distance(s1, s2)
 #    anaphora = test_xml()
 #    get_anaphora_with_periods(anaphora)
 #    test_nltk(anaphora)
