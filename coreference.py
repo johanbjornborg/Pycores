@@ -1,5 +1,6 @@
 import os
 from pprint import pprint as pp
+from math import fabs
 import sys, nltk, re
 '''
 Coreference Resolution
@@ -13,10 +14,11 @@ Created on Oct 25, 2012
 @author: Joel Hough
 
 '''
+
 sentence_tokenizer = nltk.data.load('tokenizers/punkt/english.pickle')
 word_tokenizer = nltk.tokenize.punkt.PunktWordTokenizer()
 lemmatizer = nltk.WordNetLemmatizer()
-tagger = nltk.RegexpTagger([(r'coref_tag_beg_.*', 'CRB'), 
+tagger = nltk.RegexpTagger([(r'coref_tag_beg_.*', 'CRB'),
                             (r'coref_tag_end_.*', 'CRE'),
                             (r'\$[0-9]+(.[0-9]+)?', 'NN')], backoff=nltk.data.load('taggers/maxent_treebank_pos_tagger/english.pickle'))
 names = nltk.corpus.names
@@ -145,18 +147,14 @@ def pronoun_matcher(potential_antecedent, anaphor):
                 continue
 
 def is_appositive(potential_antecedent, anaphor):
-    
     try:
-        sentence = anaphor['sentence']
-        #If the chunk prior to the anaphor location is a NP, verify that it also contains a comma.
-        #        print anaphor
-        if sentence[-1].node == 'NP': # Probably should check the anaphor to ensure that is in fact a NP as well.
-            appos = [ap for ap in sentence[-1].leaves() if ',' in ap[0]]
-            if appos:
+        reg = r"""{ant},\s*""".format(ant=potential_antecedent['value'], ana=anaphor['value'])
+        m = re.search(reg, anaphor['sentence'])
+        if m:
+            ana_i, ana_j = anaphor['position']
+            ant_i, ant_j = potential_antecedent['position']
+            if (ana_i == ant_i) and fabs(ana_j - ant_j) == 1:
                 return True
-        else:
-            return False
-    except AttributeError:
         return False
     except KeyError:
         return False 
@@ -176,13 +174,14 @@ def edit_distance(anaphor, potential_antecedent):
     if len(ana) < len(ant):
         return edit_distance(potential_antecedent, anaphor)
 
-    for i in range(0,len(ana)):
+    for i in range(0, len(ana)):
         if i >= len(ant):
             dist += levenshtein(ana[i], "")
         else:
             dist += levenshtein(ana[i], ant[i])
     return dist 
 
+##
 def levenshtein(s1, s2):
     if len(s2) == 0:
         return len(s1)
@@ -190,8 +189,8 @@ def levenshtein(s1, s2):
     for i, c1 in enumerate(s1):
         current_row = [i + 1]
         for j, c2 in enumerate(s2):
-            insertions = previous_row[j + 1] + 1 # j+1 instead of j since previous_row and current_row are one character longer
-            deletions = current_row[j] + 1       # than s2
+            insertions = previous_row[j + 1] + 1 
+            deletions = current_row[j] + 1       
             substitutions = previous_row[j] + (c1 != c2)
             current_row.append(min(insertions, deletions, substitutions))
         previous_row = current_row
@@ -245,6 +244,7 @@ def features(anaphor, potential_antecedent):
         'sentence_distance': sentence_distance(anaphor, potential_antecedent),
         'distance': distance(anaphor, potential_antecedent),
         'is_appositive' : is_appositive(potential_antecedent, anaphor),
+        'edit_distance' : edit_distance(anaphor, potential_antecedent),
 #        'pronoun' : pronoun_matcher(potential_antecedent, anaphor)
         }
 
