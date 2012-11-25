@@ -114,7 +114,7 @@ def pronoun_matcher(potential_antecedent, anaphor):
 
 def is_appositive(potential_antecedent, anaphor):
     try:
-        reg = r"""{ant},\s*""".format(ant=potential_antecedent['value'], ana=anaphor['value'])
+        reg = r"""{ant},\s*""".format(ant=re.escape(potential_antecedent['value']), ana=re.escape(anaphor['value']))
         m = re.search(reg, anaphor['sentence'])
         if m:
             ana_i, ana_j = anaphor['position']
@@ -170,7 +170,7 @@ def each_with_tail(seq):
         yield (l[i - 1], l[i:])
 
 def any_word_matches_p(anaphor, potential_antecedent):
-    return any(word for word in anaphor['value'].split() if lemmatize(word.lower()) in map(lambda w: lemmatize(w.lower()), potential_antecedent['value'].split()))
+    return any(len(word) > 3 for word in anaphor['value'].split() if lemmatize(word.lower()) in map(lambda w: lemmatize(w.lower()), potential_antecedent['value'].split()))
 
 def sentence_distance(anaphor, potential_antecedent):
     return anaphor['position'][0] - potential_antecedent['position'][0]
@@ -186,7 +186,7 @@ def features(anaphor, potential_antecedent):
         'word_match': any_word_matches_p(anaphor, potential_antecedent),
         'sentence_distance': sentence_distance(anaphor, potential_antecedent),
         'distance': distance(anaphor, potential_antecedent),
-        'is_appositive' : is_appositive(potential_antecedent, anaphor),
+        'is_appositive' : False,#is_appositive(potential_antecedent, anaphor),
         'edit_distance' : edit_distance(anaphor, potential_antecedent),
 #        'pronoun' : pronoun_matcher(potential_antecedent, anaphor)
         }
@@ -200,11 +200,26 @@ def coreferent_pairs_features(corefs):
     return refs
 
 def feature_resolver(corefs):
-    features = coreferent_pairs_features(corefs)
-    for id in features:
-        matches = filter(lambda f: f['word_match'], features[id])
-        if matches:
-            yield {'ID': id, 'REF': min(matches, key=lambda f: f['distance'])['REF']}
+    features_of_coref_antecedents = coreferent_pairs_features(corefs)
+    for coref_id, antecedents in features_of_coref_antecedents.items():
+        word_matches = []
+        resolution = None
+        for antecedent in antecedents:
+            if antecedent['is_appositive']:
+                resolution = antecedent
+                break
+            if antecedent['word_match']:
+                word_matches.append(antecedent)
+
+        if not resolution:
+            if word_matches:
+                resolution = min(word_matches, key=lambda f: f['distance'])
+            else:
+                if antecedents:
+                    resolution = antecedents[0]
+
+        if resolution:
+            yield {'ID': coref_id, 'REF': resolution['REF']}
 
 def update_refs(text, refs):
     """
