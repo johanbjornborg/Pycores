@@ -38,12 +38,16 @@ chunker_grammar = r"""
 NP:
 {<CRB>(<.*>+?)<CRE>}
 {<DT|PP\$>?<JJ>*<NN.*>+} # chunk determiner/possessive, adjectives and nouns
-{<WP.*>}
+#{<WP.*>}
 {<PRP.*>}
 """
 chunker = nltk.RegexpParser(chunker_grammar)
 titles = ['Mrs', 'Mr', 'Ms', 'Prof', 'Dr', 'Gen', 'Rep', 'Sen', 'St', 'Sr', 'Jr', 'PhD', 'MD', 'BA', 'MA', 'DDS']
 stopwords = nltk.corpus.stopwords.words('english') + titles
+male_pronouns = ['he', 'him', 'himself']
+female_pronouns = ['she', 'her', 'herself']
+neuter_pronouns = ['it', 'itself', 'they']
+plural_pronouns = ['we']
 
 def chunk(sentence):
     return chunker.parse(sentence)
@@ -196,11 +200,24 @@ def all_words_in_antecedent_p(anaphor, potential_antecedent):
     ana_set = important_words(anaphor['value'])
     return len(ana_set) > 0 and len(ana_set - important_words(potential_antecedent['value'])) == 0
 
+def stupid_pronoun_match_p(anaphor, potential_antecedent):
+    ana = split_and_strip(anaphor['value'].lower())
+    ant = split_and_strip(potential_antecedent['value'].lower())
+    if len(ana) == 0 or len(ant) == 0:
+        return False
+    for ps in [male_pronouns, female_pronouns, neuter_pronouns, plural_pronouns]:
+        if ana[0] in ps and ant[0] in ps:
+            return True
+    return False
+
 def string_match_p(anaphor, potential_antecedent):
     return anaphor['value'] == potential_antecedent['value']
 
 def any_word_matches_p(anaphor, potential_antecedent):
     return any(word for word in important_words(anaphor['value']) if lemmatize(word.lower()) in map(lambda w: lemmatize(w.lower()), important_words(potential_antecedent['value'])))
+
+def it_referring_the_p(anaphor, potential_antecedent):
+    return potential_antecedent['value'].lower().startswith('the') and anaphor['value'].lower() == 'it'
 
 def sentence_distance(anaphor, potential_antecedent):
     return anaphor['position'][0] - potential_antecedent['position'][0]
@@ -221,6 +238,8 @@ def features(anaphor, potential_antecedent):
         'value': potential_antecedent['value'],
         'string_match': string_match_p(anaphor, potential_antecedent),
         'all_words_in_antecedent': all_words_in_antecedent_p(anaphor, potential_antecedent),
+        'it_referring_the': it_referring_the_p(anaphor, potential_antecedent),
+        'stupid_prounoun_match': stupid_pronoun_match_p(anaphor, potential_antecedent),
         'word_match': any_word_matches_p(anaphor, potential_antecedent),
         'sentence_distance': sentence_distance(anaphor, potential_antecedent),
         'distance': distance(anaphor, potential_antecedent),
@@ -250,8 +269,12 @@ def feature_resolver(corefs):
                 potential_resolutions.append(((1, antecedent['distance']), antecedent, 'all_words'))
             if antecedent['word_match']:
                 potential_resolutions.append(((2, antecedent['distance']), antecedent, 'word_match'))
+            if antecedent['it_referring_the']:
+                potential_resolutions.append(((3, antecedent['distance']), antecedent, 'it_referring_the'))
+            if antecedent['stupid_prounoun_match']:
+                potential_resolutions.append(((4, antecedent['distance']), antecedent, 'stupid_prounoun_match'))
             if antecedent['is_appositive']:
-                potential_resolutions.append(((3, antecedent['distance']), antecedent, 'appositive'))
+                potential_resolutions.append(((5, antecedent['distance']), antecedent, 'appositive'))
 
         if not resolution:
             if potential_resolutions:
@@ -263,8 +286,10 @@ def feature_resolver(corefs):
             else:
                 if antecedents:
                     resolution = antecedents[0]
-                    print "PUNT '{0[value]}'".format(coref_dict[coref_id])
-                    #print "PUNT '{0[value]}' in {0[chunked_sentence]}".format(coref_dict[coref_id])
+                    #if not 'the' in coref_dict[coref_id]['value'].lower():
+                    #                    print "PUNT '{0[value]}'".format(coref_dict[coref_id])
+                        #                    else:
+                        #print "PUNT '{0[value]}' in {0[chunked_sentence]}".format(coref_dict[coref_id])
 
         if resolution:
             yield {'ID': coref_id, 'REF': resolution['REF']}
