@@ -114,13 +114,23 @@ def pronoun_matcher(potential_antecedent, anaphor):
 
 def is_appositive(potential_antecedent, anaphor):
     try:
-        reg = r"""{ant},\s*""".format(ant=re.escape(potential_antecedent['value']), ana=re.escape(anaphor['value']))
-        m = re.search(reg, anaphor['sentence'])
-        if m:
-            ana_i, ana_j = anaphor['position']
-            ant_i, ant_j = potential_antecedent['position']
-            if (ana_i == ant_i) and fabs(ana_j - ant_j) == 1:
-                return True
+        ana_i, ana_j = anaphor['position']
+        ant_i, ant_j = potential_antecedent['position']
+        if (ana_i == ant_i) and fabs(ana_j - ant_j) == 1:
+            male = [n for n in names.words('male.txt')]
+            female = [n for n in names.words('female.txt')]
+            _names = male + female
+            appos = []
+            for ana in anaphor['value'].split():
+                appos = [ana for m in _names if m in ana]
+                if appos:
+                    print appos
+                    return True
+            for ant in potential_antecedent['value'].split():
+                appos = [ant for m in _names if m in ant]
+                if appos:
+                    print appos
+                    return True
         return False
     except KeyError:
         return False
@@ -186,7 +196,7 @@ def features(anaphor, potential_antecedent):
         'word_match': any_word_matches_p(anaphor, potential_antecedent),
         'sentence_distance': sentence_distance(anaphor, potential_antecedent),
         'distance': distance(anaphor, potential_antecedent),
-        'is_appositive' : False,#is_appositive(potential_antecedent, anaphor),
+        'is_appositive' : is_appositive(potential_antecedent, anaphor),
         'edit_distance' : edit_distance(anaphor, potential_antecedent),
 #        'pronoun' : pronoun_matcher(potential_antecedent, anaphor)
         }
