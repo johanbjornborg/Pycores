@@ -290,17 +290,17 @@ def feature_resolver(corefs):
             if antecedent['all_words_in_antecedent']:
                 potential_resolutions.append(((1, antecedent['distance']), antecedent, 'all_words'))
             if antecedent['word_match']:
-                potential_resolutions.append(((2, antecedent['distance']), antecedent, 'word_match'))
+                potential_resolutions.append(((3, antecedent['distance']), antecedent, 'word_match'))
             if antecedent['it_referring_the']:
-                potential_resolutions.append(((3, antecedent['distance']), antecedent, 'it_referring_the'))
+                potential_resolutions.append(((2, antecedent['distance']), antecedent, 'it_referring_the'))
             if antecedent['stupid_prounoun_match']:
                 potential_resolutions.append(((4, antecedent['distance']), antecedent, 'stupid_prounoun_match'))
             if antecedent['pronoun']:
-                potential_resolutions.append(((5, antecedent['distance']), antecedent, 'pronoun'))
+                potential_resolutions.append(((2, antecedent['distance']), antecedent, 'pronoun'))
             if antecedent['edit_distance']:
                 potential_resolutions.append(((6, antecedent['distance']), antecedent, 'edit_distance'))
             if antecedent['is_appositive']:
-                potential_resolutions.append(((7, antecedent['distance']), antecedent, 'appositive'))
+                potential_resolutions.append(((2, antecedent['distance']), antecedent, 'appositive'))
 
         if not resolution:
             if potential_resolutions:
