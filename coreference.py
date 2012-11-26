@@ -28,7 +28,7 @@ class Memoize:
 sentence_tokenizer = nltk.data.load('tokenizers/punkt/english.pickle')
 word_tokenizer = nltk.tokenize.punkt.PunktWordTokenizer()
 lemmatizer = nltk.WordNetLemmatizer()
-tagger = nltk.RegexpTagger([(r'.*coref_tag_beg_.*', 'CRB'), 
+tagger = nltk.RegexpTagger([(r'.*coref_tag_beg_.*', 'CRB'),
                             (r'.*coref_tag_end_.*', 'CRE'),
                             (r'\$[0-9]+(.[0-9]+)?', 'NN')], backoff=nltk.data.load('taggers/maxent_treebank_pos_tagger/english.pickle'))
 names = nltk.corpus.names
@@ -44,11 +44,17 @@ NP:
 chunker = nltk.RegexpParser(chunker_grammar)
 titles = ['Mrs', 'Mr', 'Ms', 'Prof', 'Dr', 'Gen', 'Rep', 'Sen', 'St', 'Sr', 'Jr', 'PhD', 'MD', 'BA', 'MA', 'DDS']
 stopwords = nltk.corpus.stopwords.words('english') + titles
+ 
 male_pronouns = ['he', 'him', 'himself']
 female_pronouns = ['she', 'her', 'herself']
-neuter_pronouns = ['it', 'itself', 'they']
-plural_pronouns = ['we']
+neuter_pronouns = ['it', 'itself', 'they', 'its']
+plural_pronouns = ['us', 'we', 'they', 'their', 'theirs', 'them', 'themselves', 'nobody', 'none' ]
 
+
+pronoun_gender = { 'male' : male_pronouns,
+          'female' : female_pronouns,
+          'neuter' : neuter_pronouns, } 
+          
 def chunk(sentence):
     return chunker.parse(sentence)
 
@@ -92,31 +98,60 @@ def get_anaphora(text):
              'position': m.start()} for m in re.finditer(coref_token_re, text)]
 
 def pronoun_matcher(potential_antecedent, anaphor):
-    sentence = anaphor['sentence']
-#    print potential_antecedent['value'], sentence
+    
+    if len(anaphor['value'].split()) > 1:
+        return None
+    
+    def compute_score(ana, ant):
+        ans, ani = ana
+        ats, ati = ant
+        one = fabs(ats - ans) + 1
+        two = fabs(ati - ani) + 1
+        return one * two
+
+    score = compute_score(anaphor['position'], potential_antecedent['position'])
     global names
-#    t = chunker.parse(sentences)
-    a = [(a[0]) for a in anaphor['value'] if 'PRP' in a[1]]
-    if a: # If there exists a pronoun.
-        for u in reversed(sentence):
-            try:
-                if u.node == 'NP': #If we have an NP, check gender/number agreement.
-                    # Male pronoun agreement. Returns first agreement found.
-                    if a[0] in ['he', 'his', 'him']:
-                        male = [n for n in names.words('male.txt') if n in ''.join([_u[0] for _u in u])]
-                        if male:
-                            return ' '.join([_u[0] for _u in u.leaves() if 'NNP' in _u])
-                    # Female pronoun agreement. Returns first agreement found.
-                    elif a[0] in ['she', 'hers', 'her']:
-                        female = [n for n in names.words('female.txt') if n in ''.join([_u[0] for _u in u])]
-                        if female:
-                            return ' '.join([_u[0] for _u in u.leaves() if 'NNP' in _u])
-                    elif a[0] in ['it', 'its', 'itself']:
-                        neuter = [_u[0] for _u in u.leaves() if 'NNP' not in _u]
-                        if neuter:
-                            return ' '.join(neuter)               
-            except AttributeError:
-                continue
+    [(ana, anapos)] = nltk.pos_tag(anaphor['value'].lower().split())
+    if anapos == 'PRP': # Make sure the anaphor is a pronoun.
+
+        count = 0
+        _gender = [k for k, v in pronoun_gender.iteritems() if ana in v]
+        plural = False
+
+        if ana in plural_pronouns:
+            plural = True
+            
+        tagged_ant = [(ant, antpos) for ant, antpos in nltk.pos_tag(potential_antecedent['value'].lower().split())]
+        male = [n.lower() for n in names.words('male.txt')] + ['Mr.', 'Jr', 'Sr']
+        female = [n.lower() for n in names.words('female.txt')] + ['Ms.', 'Miss', 'Mrs.']
+        neuter = ['Prof', 'Dr', 'Gen', 'Rep', 'Sen', 'St', 'PhD', 'MD', 'BA', 'MA', 'DDS']
+        print potential_antecedent['value'], ana
+        for t in tagged_ant:
+            if 'male' in _gender and t[0] in male:
+#                print "Male:\n", score - 1, t
+                return score - 1
+                break
+            elif 'female' in _gender and t[0] in female:
+#                print 'Female:\n', score - 1, t
+                return score - 1
+                break
+            elif 'neuter' in _gender and t[0] in neuter:
+#                print 'neuter:\n', score + 1, t
+                return score + 1
+                break
+            elif plural and ('NNPS' or 'NNS' in t):
+#                print 'plural:\n', score + 1, t
+                return score + 1
+                break
+#            elif t[1] in ['NN', 'NNS', 'NNP', 'NNPS']:
+#                print 'Generic match:\n', score, t
+#                break
+        
+
+
+def gender_matches_p(potential_antecedent, anaphor):
+    
+    pass
 
 def is_appositive(potential_antecedent, anaphor):
     try:
@@ -127,16 +162,14 @@ def is_appositive(potential_antecedent, anaphor):
             female = [n for n in names.words('female.txt')]
             _names = male + female
             appos = []
-            for ana in anaphor['value'].split():
+            for ana in [anaphor['value'].split(), potential_antecedent['value'].split()] :
                 appos = [ana for m in _names if m in ana]
                 if appos:
-                    print appos
                     return True
-            for ant in potential_antecedent['value'].split():
-                appos = [ant for m in _names if m in ant]
-                if appos:
-                    print appos
-                    return True
+#            for ant in potential_antecedent['value'].split():
+#                appos = [ant for m in _names if m in ant]
+#                if appos:
+#                    return True
         return False
     except KeyError:
         return False
@@ -245,7 +278,7 @@ def features(anaphor, potential_antecedent):
         'distance': distance(anaphor, potential_antecedent),
         'is_appositive' : is_appositive(potential_antecedent, anaphor),
         'edit_distance' : edit_distance(anaphor, potential_antecedent),
-#        'pronoun' : pronoun_matcher(potential_antecedent, anaphor)
+        'pronoun' : pronoun_matcher(potential_antecedent, anaphor)
         }
 
 def coreferent_pairs_features(corefs):
