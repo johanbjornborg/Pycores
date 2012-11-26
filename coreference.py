@@ -42,6 +42,8 @@ NP:
 {<PRP.*>}
 """
 chunker = nltk.RegexpParser(chunker_grammar)
+titles = ['Mrs', 'Mr', 'Ms', 'Prof', 'Dr', 'Gen', 'Rep', 'Sen', 'St', 'Sr', 'Jr', 'PhD', 'MD', 'BA', 'MA', 'DDS']
+stopwords = nltk.corpus.stopwords.words('english') + titles
 
 def chunk(sentence):
     return chunker.parse(sentence)
@@ -179,8 +181,26 @@ def each_with_tail(seq):
         i += 1
         yield (l[i - 1], l[i:])
 
+def split_and_strip(text):
+    return re.findall(r'\w+', text)
+
+def without_stop_words(words):
+    def not_stop_word(word):
+        return not word.lower() in ' '.join(stopwords).lower()
+    return filter(not_stop_word, words)
+
+def important_words(text):
+    return set(without_stop_words(split_and_strip(text)))
+
+def all_words_in_antecedent_p(anaphor, potential_antecedent):
+    ana_set = important_words(anaphor['value'])
+    return len(ana_set) > 0 and len(ana_set - important_words(potential_antecedent['value'])) == 0
+
+def string_match_p(anaphor, potential_antecedent):
+    return anaphor['value'] == potential_antecedent['value']
+
 def any_word_matches_p(anaphor, potential_antecedent):
-    return any(len(word) > 3 for word in anaphor['value'].split() if lemmatize(word.lower()) in map(lambda w: lemmatize(w.lower()), potential_antecedent['value'].split()))
+    return any(word for word in important_words(anaphor['value']) if lemmatize(word.lower()) in map(lambda w: lemmatize(w.lower()), important_words(potential_antecedent['value'])))
 
 def sentence_distance(anaphor, potential_antecedent):
     return anaphor['position'][0] - potential_antecedent['position'][0]
@@ -188,11 +208,19 @@ def sentence_distance(anaphor, potential_antecedent):
 def distance(anaphor, potential_antecedent):
     a_sent, a_phrase = anaphor['position']
     b_sent, b_phrase = potential_antecedent['position']
-    return (a_sent - b_sent, a_phrase - b_phrase)
+    sentence_dist = a_sent - b_sent
+    if sentence_dist == 0:
+        phrase_dist = -(a_phrase - b_phrase)
+    else:
+        phrase_dist = -b_phrase
+    return (sentence_dist, phrase_dist)
 
 def features(anaphor, potential_antecedent):
     return {
         'REF': potential_antecedent['ID'],
+        'value': potential_antecedent['value'],
+        'string_match': string_match_p(anaphor, potential_antecedent),
+        'all_words_in_antecedent': all_words_in_antecedent_p(anaphor, potential_antecedent),
         'word_match': any_word_matches_p(anaphor, potential_antecedent),
         'sentence_distance': sentence_distance(anaphor, potential_antecedent),
         'distance': distance(anaphor, potential_antecedent),
@@ -210,23 +238,33 @@ def coreferent_pairs_features(corefs):
     return refs
 
 def feature_resolver(corefs):
+    coref_dict = dict([(c['ID'], c) for c in corefs])
     features_of_coref_antecedents = coreferent_pairs_features(corefs)
     for coref_id, antecedents in features_of_coref_antecedents.items():
-        word_matches = []
+        potential_resolutions = []
         resolution = None
         for antecedent in antecedents:
-            if antecedent['is_appositive']:
-                resolution = antecedent
-                break
+            if antecedent['string_match']:
+                potential_resolutions.append(((0, antecedent['distance']), antecedent, 'string_match'))
+            if antecedent['all_words_in_antecedent']:
+                potential_resolutions.append(((1, antecedent['distance']), antecedent, 'all_words'))
             if antecedent['word_match']:
-                word_matches.append(antecedent)
+                potential_resolutions.append(((2, antecedent['distance']), antecedent, 'word_match'))
+            if antecedent['is_appositive']:
+                potential_resolutions.append(((3, antecedent['distance']), antecedent, 'appositive'))
 
         if not resolution:
-            if word_matches:
-                resolution = min(word_matches, key=lambda f: f['distance'])
+            if potential_resolutions:
+                priority, resolution, method = min(potential_resolutions, key=lambda p: p[0])
+                #print method
+                #print "{0}@{1}: '{2[value]}' in '{2[sentence]}' matched {3[value]}".format(method, priority, coref_dict[coref_id], resolution)
+            #if word_matches:
+            #    resolution = min(word_matches, key=lambda f: f['distance'])
             else:
                 if antecedents:
                     resolution = antecedents[0]
+                    print "PUNT '{0[value]}'".format(coref_dict[coref_id])
+                    #print "PUNT '{0[value]}' in {0[chunked_sentence]}".format(coref_dict[coref_id])
 
         if resolution:
             yield {'ID': coref_id, 'REF': resolution['REF']}
@@ -353,8 +391,9 @@ def resolve_files(files, response_dir_path):
             #if 'we' in tokenized_sentence:
             #    print tagged_sentence
             chunked_sentence = chunk(tagged_sentence)
-            
-            for i_noun_phrase, noun_phrase in enumerate(chunked_sentence.subtrees(filter=lambda s: s.node == 'NP')):
+
+            noun_phrases = list(chunked_sentence.subtrees(filter=lambda s: s.node == 'NP'))
+            for i_noun_phrase, noun_phrase in enumerate(noun_phrases):
                 #                print noun_phrase
                 was_an_anaphor = is_anaphor(noun_phrase)
                 if not was_an_anaphor:
@@ -365,6 +404,7 @@ def resolve_files(files, response_dir_path):
                 add_coref_data(coref, {
                     'is_anaphor': was_an_anaphor,
                     'position': (i_sentence, i_noun_phrase),
+                    'phrases_in_sentence': len(noun_phrases),
                     'tokenized_sentence': tokenized_sentence,
                     'tagged_sentence': tagged_sentence,
                     'chunked_sentence': chunked_sentence,
