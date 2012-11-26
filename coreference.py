@@ -111,7 +111,13 @@ def pronoun_matcher(potential_antecedent, anaphor):
 
     score = compute_score(anaphor['position'], potential_antecedent['position'])
     global names
-    [(ana, anapos)] = nltk.pos_tag(anaphor['value'].lower().split())
+    tagged = [(ana.lower(), anapos) for ana, anapos in anaphor['tagged_sentence'] if ana == anaphor['value']]
+    
+    for t in tagged:
+        ana = t[0]
+        anapos = t[1]
+        break
+    
     if anapos == 'PRP': # Make sure the anaphor is a pronoun.
 
         count = 0
@@ -121,37 +127,20 @@ def pronoun_matcher(potential_antecedent, anaphor):
         if ana in plural_pronouns:
             plural = True
             
-        tagged_ant = [(ant, antpos) for ant, antpos in nltk.pos_tag(potential_antecedent['value'].lower().split())]
+        tagged_ant = [(ant, antpos) for ant, antpos in potential_antecedent['tagged_sentence'] if ant in potential_antecedent['value']]
         male = [n.lower() for n in names.words('male.txt')] + ['Mr.', 'Jr', 'Sr']
         female = [n.lower() for n in names.words('female.txt')] + ['Ms.', 'Miss', 'Mrs.']
         neuter = ['Prof', 'Dr', 'Gen', 'Rep', 'Sen', 'St', 'PhD', 'MD', 'BA', 'MA', 'DDS']
-        print potential_antecedent['value'], ana
         for t in tagged_ant:
             if 'male' in _gender and t[0] in male:
-#                print "Male:\n", score - 1, t
                 return score - 1
-                break
             elif 'female' in _gender and t[0] in female:
-#                print 'Female:\n', score - 1, t
                 return score - 1
-                break
             elif 'neuter' in _gender and t[0] in neuter:
-#                print 'neuter:\n', score + 1, t
                 return score + 1
-                break
             elif plural and ('NNPS' or 'NNS' in t):
-#                print 'plural:\n', score + 1, t
                 return score + 1
-                break
-#            elif t[1] in ['NN', 'NNS', 'NNP', 'NNPS']:
-#                print 'Generic match:\n', score, t
-#                break
-        
 
-
-def gender_matches_p(potential_antecedent, anaphor):
-    
-    pass
 
 def is_appositive(potential_antecedent, anaphor):
     try:
@@ -306,8 +295,12 @@ def feature_resolver(corefs):
                 potential_resolutions.append(((3, antecedent['distance']), antecedent, 'it_referring_the'))
             if antecedent['stupid_prounoun_match']:
                 potential_resolutions.append(((4, antecedent['distance']), antecedent, 'stupid_prounoun_match'))
+            if antecedent['edit_distance']:
+                potential_resolutions.append(((5, antecedent['distance']), antecedent, 'edit_distance'))
+            if antecedent['pronoun']:
+                potential_resolutions.append(((6, antecedent['distance']), antecedent, 'pronoun'))
             if antecedent['is_appositive']:
-                potential_resolutions.append(((5, antecedent['distance']), antecedent, 'appositive'))
+                potential_resolutions.append(((7, antecedent['distance']), antecedent, 'appositive'))
 
         if not resolution:
             if potential_resolutions:
