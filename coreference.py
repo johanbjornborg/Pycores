@@ -1,5 +1,4 @@
 import os
-from pprint import pprint as pp
 from math import fabs
 import sys, nltk, re
 import xml.sax.saxutils as saxutils
@@ -31,7 +30,9 @@ lemmatizer = nltk.WordNetLemmatizer()
 tagger = nltk.RegexpTagger([(r'.*coref_tag_beg_.*', 'CRB'),
                             (r'.*coref_tag_end_.*', 'CRE'),
                             (r'\$[0-9]+(.[0-9]+)?', 'NN')], backoff=nltk.data.load('taggers/maxent_treebank_pos_tagger/english.pickle'))
-names = nltk.corpus.names
+male_names = [name.lower() for name in nltk.corpus.names.words('male.txt') + ['Mr', 'Jr', 'Sr']]
+female_names = [name.lower() for name in nltk.corpus.names.words('female.txt') + ['Ms', 'Miss', 'Mrs']]
+neuter_names = [name.lower() for name in ['Prof', 'Gen', 'Rep', 'Sen', 'PhD', 'DDS']]
 coref_tag_re = r'(?is)<COREF ID="(\w+)">(.*?)</COREF>'
 coref_token_re = r'(?is)coref_tag_beg_(\w+)_(.*?)coref_tag_end_\1_'
 chunker_grammar = r"""
@@ -43,17 +44,18 @@ NP:
 """
 chunker = nltk.RegexpParser(chunker_grammar)
 titles = ['Mrs', 'Mr', 'Ms', 'Prof', 'Dr', 'Gen', 'Rep', 'Sen', 'St', 'Sr', 'Jr', 'PhD', 'MD', 'BA', 'MA', 'DDS']
-stopwords = nltk.corpus.stopwords.words('english') + titles
+stopwords = [word.lower() for word in nltk.corpus.stopwords.words('english') + titles]
  
-male_pronouns = ['he', 'him', 'himself']
-female_pronouns = ['she', 'her', 'herself']
-neuter_pronouns = ['it', 'itself', 'they', 'its']
-plural_pronouns = ['us', 'we', 'they', 'their', 'theirs', 'them', 'themselves', 'nobody', 'none' ]
+male_pronouns = ['he', 'himself']
+female_pronouns = ['she', 'herself']
+neuter_pronouns = ['it', 'itself']
+plural_pronouns = ['us', 'we', 'they', 'them', 'themselves']
 
 
 pronoun_gender = { 'male' : male_pronouns,
           'female' : female_pronouns,
-          'neuter' : neuter_pronouns, } 
+          'neuter' : neuter_pronouns, 
+          'plural' : plural_pronouns} 
           
 def chunk(sentence):
     return chunker.parse(sentence)
@@ -74,7 +76,6 @@ def sentence_tokenize(text, no_break_zones=[]):
 
 def adjust_spans(spans, no_break_zones):
     def valid_break(pos):
-        #print list(no_break_zones)
         for start, end in no_break_zones:
             if pos >= start and pos <= end:
                 return False
@@ -97,79 +98,50 @@ def get_anaphora(text):
              'value':m.groups()[1],
              'position': m.start()} for m in re.finditer(coref_token_re, text)]
 
+def get_pronoun_gender(word):
+    for gender, pronoun_list in pronoun_gender.items():
+        if word.lower() in pronoun_list:
+            return gender
+    return None
+
+def get_name_gender(word):
+    if word.lower() in male_names:
+        return 'male'
+    if word.lower() in female_names:
+        return 'female'
+    if word.lower() in neuter_names:
+        return 'neuter'
+    return None
+
 def pronoun_matcher(potential_antecedent, anaphor):
+    if not len(anaphor['tagged_value']) == 1:
+        return False
     
-    if len(anaphor['value'].split()) > 1:
-        return None
+    ana_word, ana_tag = anaphor['tagged_value'][0]
+    ana_gender = get_pronoun_gender(ana_word)
     
-    def compute_score(ana, ant):
-        ans, ani = ana
-        ats, ati = ant
-        one = fabs(ats - ans) + 1
-        two = fabs(ati - ani) + 1
-        return one * two
-
-    score = compute_score(anaphor['position'], potential_antecedent['position'])
-    global names
-    tagged = [(ana.lower(), anapos) for ana, anapos in anaphor['tagged_sentence'] if ana == anaphor['value']]
-    
-    for t in tagged:
-        ana = t[0]
-        anapos = t[1]
-        break
-    
-    if anapos == 'PRP': # Make sure the anaphor is a pronoun.
-
-        count = 0
-        _gender = [k for k, v in pronoun_gender.iteritems() if ana in v]
-        plural = False
-
-        if ana in plural_pronouns:
-            plural = True
+    if ana_gender and ana_tag == 'PRP': # Make sure the anaphor is a pronoun.
+        for ant_word, ant_tag in potential_antecedent['tagged_value']:
+            if ana_gender == 'plural' and ant_tag in ['NNPS', 'NNS']:
+                return True
+            ant_gender = get_name_gender(ant_word)
+            if ant_gender == ana_gender and ant_tag == 'NNP':
+                return True
+    return False
             
-        tagged_ant = [(ant, antpos) for ant, antpos in potential_antecedent['tagged_sentence'] if ant in potential_antecedent['value']]
-        male = [n.lower() for n in names.words('male.txt')] + ['Mr.', 'Jr', 'Sr']
-        female = [n.lower() for n in names.words('female.txt')] + ['Ms.', 'Miss', 'Mrs.']
-        neuter = ['Prof', 'Dr', 'Gen', 'Rep', 'Sen', 'St', 'PhD', 'MD', 'BA', 'MA', 'DDS']
-        for t in tagged_ant:
-            if 'male' in _gender and t[0] in male:
-                return score - 1
-            elif 'female' in _gender and t[0] in female:
-                return score - 1
-            elif 'neuter' in _gender and t[0] in neuter:
-                return score + 1
-            elif plural and ('NNPS' or 'NNS' in t):
-                return score + 1
-
-
 def is_appositive(potential_antecedent, anaphor):
-    try:
-        ana_i, ana_j = anaphor['position']
-        ant_i, ant_j = potential_antecedent['position']
-        if (ana_i == ant_i) and fabs(ana_j - ant_j) == 1:
-            male = [n for n in names.words('male.txt')]
-            female = [n for n in names.words('female.txt')]
-            _names = male + female
-            appos = []
-            for ana in [anaphor['value'].split(), potential_antecedent['value'].split()] :
-                appos = [ana for m in _names if m in ana]
-                if appos:
-                    return True
-#            for ant in potential_antecedent['value'].split():
-#                appos = [ant for m in _names if m in ant]
-#                if appos:
-#                    return True
-        return False
-    except KeyError:
-        return False
+    ana_i, ana_j = anaphor['position']
+    ant_i, ant_j = potential_antecedent['position']
+    if (ana_i == ant_i) and abs(ana_j - ant_j) == 1:
+        names = set(male_names + female_names)
+        ana_words = set(split_and_strip(anaphor['value']))
+        ana_has_name = len(ana_words - names) == 0 and len(ana_words) > 0
+        ant_words = set(split_and_strip(potential_antecedent['value']))
+        ant_has_name = len(ant_words - names) == 0 and len(ant_words) > 0
 
-def linguistic_form(anaphor):
-    """
-    Returns the form of the potential anaphor NP_j.
-    @param anaphor: Targeted potential anaphor of known antecedent. 
-    @return form: [proper_name, definite_description, indefinite_NP, pronoun]
-    """ 
-    pass
+        if ant_has_name or ana_has_name:
+            return True
+    return False
 
 def edit_distance(anaphor, potential_antecedent):
     ana = anaphor['value'].split()
@@ -185,7 +157,6 @@ def edit_distance(anaphor, potential_antecedent):
             dist += levenshtein(ana[i], ant[i])
     return dist 
 
-##
 def levenshtein(s1, s2):
     if len(s2) == 0:
         return len(s1)
@@ -212,17 +183,17 @@ def split_and_strip(text):
 
 def without_stop_words(words):
     def not_stop_word(word):
-        return not word.lower() in ' '.join(stopwords).lower()
+        return not word.lower() in stopwords
     return filter(not_stop_word, words)
 
 def important_words(text):
-    return set(without_stop_words(split_and_strip(text)))
+    return list(without_stop_words(split_and_strip(text)))
 
 def all_words_in_antecedent_p(anaphor, potential_antecedent):
-    ana_set = important_words(anaphor['value'])
-    return len(ana_set) > 0 and len(ana_set - important_words(potential_antecedent['value'])) == 0
+    ana_set = set(important_words(anaphor['value']))
+    return len(ana_set) > 0 and len(ana_set - set(important_words(potential_antecedent['value']))) == 0
 
-def stupid_pronoun_match_p(anaphor, potential_antecedent):
+def exact_pronoun_match_p(anaphor, potential_antecedent):
     ana = split_and_strip(anaphor['value'].lower())
     ant = split_and_strip(potential_antecedent['value'].lower())
     if len(ana) == 0 or len(ant) == 0:
@@ -233,7 +204,9 @@ def stupid_pronoun_match_p(anaphor, potential_antecedent):
     return False
 
 def string_match_p(anaphor, potential_antecedent):
-    return anaphor['value'] == potential_antecedent['value']
+    ana_words = important_words(anaphor['value'])
+    ant_words = important_words(potential_antecedent['value'])
+    return len(ana_words) > 0 and ana_words == ant_words
 
 def any_word_matches_p(anaphor, potential_antecedent):
     return any(word for word in important_words(anaphor['value']) if lemmatize(word.lower()) in map(lambda w: lemmatize(w.lower()), important_words(potential_antecedent['value'])))
@@ -261,7 +234,7 @@ def features(anaphor, potential_antecedent):
         'string_match': string_match_p(anaphor, potential_antecedent),
         'all_words_in_antecedent': all_words_in_antecedent_p(anaphor, potential_antecedent),
         'it_referring_the': it_referring_the_p(anaphor, potential_antecedent),
-        'stupid_prounoun_match': stupid_pronoun_match_p(anaphor, potential_antecedent),
+        'exact_pronoun_match': exact_pronoun_match_p(anaphor, potential_antecedent),
         'word_match': any_word_matches_p(anaphor, potential_antecedent),
         'sentence_distance': sentence_distance(anaphor, potential_antecedent),
         'distance': distance(anaphor, potential_antecedent),
@@ -293,29 +266,21 @@ def feature_resolver(corefs):
                 potential_resolutions.append(((3, antecedent['distance']), antecedent, 'word_match'))
             if antecedent['it_referring_the']:
                 potential_resolutions.append(((2, antecedent['distance']), antecedent, 'it_referring_the'))
-            if antecedent['stupid_prounoun_match']:
-                potential_resolutions.append(((4, antecedent['distance']), antecedent, 'stupid_prounoun_match'))
-            if antecedent['pronoun']:
+            if antecedent['exact_pronoun_match']:
+                potential_resolutions.append(((4, antecedent['distance']), antecedent, 'exact_pronoun_match'))
+            if antecedent['pronoun'] and antecedent['distance'] < (3,0):
                 potential_resolutions.append(((2, antecedent['distance']), antecedent, 'pronoun'))
-            if antecedent['edit_distance']:
-                potential_resolutions.append(((6, antecedent['distance']), antecedent, 'edit_distance'))
+                #if antecedent['edit_distance']:
+                #potential_resolutions.append(((6, antecedent['distance']), antecedent, 'edit_distance'))
             if antecedent['is_appositive']:
-                potential_resolutions.append(((2, antecedent['distance']), antecedent, 'appositive'))
+                potential_resolutions.append(((7, antecedent['distance']), antecedent, 'appositive'))
 
         if not resolution:
             if potential_resolutions:
                 priority, resolution, method = min(potential_resolutions, key=lambda p: p[0])
-                #print method
-                #print "{0}@{1}: '{2[value]}' in '{2[sentence]}' matched {3[value]}".format(method, priority, coref_dict[coref_id], resolution)
-            #if word_matches:
-            #    resolution = min(word_matches, key=lambda f: f['distance'])
             else:
                 if antecedents:
                     resolution = antecedents[0]
-                    #if not 'the' in coref_dict[coref_id]['value'].lower():
-                    #                    print "PUNT '{0[value]}'".format(coref_dict[coref_id])
-                        #                    else:
-                        #print "PUNT '{0[value]}' in {0[chunked_sentence]}".format(coref_dict[coref_id])
 
         if resolution:
             yield {'ID': coref_id, 'REF': resolution['REF']}
@@ -394,7 +359,7 @@ def resolve_files(files, response_dir_path):
                 tokens[-1] = (tag[0] + '.', tag[1])
 
         surround_with_coref_tokens(noun_phrase, gensym())
-        #move_last_period_out_of_coref_tag(noun_phrase)
+        move_last_period_out_of_coref_tag(noun_phrase)
 
     def is_anaphor(tokens):
         word, tag = tokens[0]
@@ -436,16 +401,12 @@ def resolve_files(files, response_dir_path):
         np_tagged_sentences = []
         sentences = sentence_tokenize(text, no_break_zones(text))
         for i_sentence, sentence in enumerate(sentences):
-            #            print sentence
             tokenized_sentence = word_tokenize(sentence)
             tagged_sentence = pos_tag(tokenized_sentence)
-            #if 'we' in tokenized_sentence:
-            #    print tagged_sentence
             chunked_sentence = chunk(tagged_sentence)
 
             noun_phrases = list(chunked_sentence.subtrees(filter=lambda s: s.node == 'NP'))
             for i_noun_phrase, noun_phrase in enumerate(noun_phrases):
-                #                print noun_phrase
                 was_an_anaphor = is_anaphor(noun_phrase)
                 if not was_an_anaphor:
                     tag_as_new_coref(noun_phrase)
@@ -486,7 +447,6 @@ def main():
 
 if __name__ == '__main__':
     main()
-    #cProfile.run('main()')
 
 
 
